@@ -128,15 +128,18 @@ def check_box(ws, cell_ref):
 
 def split_en_name(en: str):
     """把英文姓名拆成 (姓, 名)。
-    範例：'QU,SHENZHONG' -> ('QU', 'SHENZHONG')
-          'SHEN DAN'     -> ('SHEN', 'DAN')  （中文習慣：第一個字是姓）
+    範例：'QU,SHENZHONG'  -> ('QU', 'SHENZHONG')   （逗號分隔）
+          'TANG/QINGPING' -> ('TANG', 'QINGPING')  （斜線分隔，護照常見格式）
+          'SHEN DAN'      -> ('SHEN', 'DAN')        （中文習慣：第一個字是姓）
     """
     en = (en or "").strip()
     if not en:
         return "", ""
-    if "," in en:
-        a, b = en.split(",", 1)
-        return a.strip(), b.strip()
+    # 逗號或斜線分隔：前=姓 後=名
+    for sep in (",", "/"):
+        if sep in en:
+            a, b = en.split(sep, 1)
+            return a.strip(), b.strip()
     toks = en.split()
     if len(toks) >= 2:
         return toks[0], " ".join(toks[1:])

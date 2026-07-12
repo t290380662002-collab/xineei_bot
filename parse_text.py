@@ -50,13 +50,18 @@ ALIASES = {
 # 所有可用作「標籤」的字串（標準欄位 + 別名），用於整段掃描
 _ALL = sorted(set(STANDARD + list(ALIASES.keys())), key=len, reverse=True)
 _LABEL_ALT = "|".join(re.escape(k) for k in _ALL)
-# 掃描整段：捕捉 標籤[:：=]值，值到「下一個標籤」或「換行/文末」為止。
-# 注意：不使用 DOTALL，讓「值」不跨行，避免最後一個欄位把文末多餘文字
-#       （例如備注以外的內容）整段吞進去、污染該欄位（如證件號碼）。
+# 單行掃描：捕捉 標籤[:：=]值，值到「同行下一個標籤」或「行尾」為止。
+# 注意：不跨行，避免最後一個欄位把文末多餘文字整段吞進去、污染欄位（如證件號碼）。
 _PAIR_RE = re.compile(
     r"(?P<lab>" + _LABEL_ALT + r")[:：=＝]\s*(?P<val>.*?)(?=(?P<lab2>" + _LABEL_ALT + r")[:：=＝]|\n|\r|\Z)",
     re.MULTILINE,
 )
+# 判斷一整行是否「純標籤字」（沒有冒號、沒有值，例如單獨一行的「备注」）
+_BARE_LABEL_RE = re.compile(r"^\s*(?P<lab>" + _LABEL_ALT + r")\s*$")
+
+# 可容納「換行續行」的欄位（值可能被使用者換行拆開，需把續行併回）：
+#   房型 / 飯店 / 姓名 直接接續；備注 用「；」分隔。
+_WRAPPABLE = {"房型", "飯店", "入住者中文", "入住者英文", "備注"}
 
 
 def _match_field(label):
@@ -70,51 +75,50 @@ def _match_field(label):
     return None
 
 
+def _append_value(pairs, field, text, sep=""):
+    """把續行文字併到最近一筆同欄位的值後面；若無則新增一筆。"""
+    for i in range(len(pairs) - 1, -1, -1):
+        if pairs[i][0] == field:
+            old = pairs[i][1]
+            joined = (old + (sep if old else "") + text).strip(sep) if sep else (old + text)
+            pairs[i] = (field, joined.strip())
+            return
+    pairs.append((field, text.strip()))
+
+
 def _extract_pairs(text):
-    """回傳 (pairs, spans)。
-    pairs = [(field, value), ...]（依文中出現順序）；
-    spans = [(start, end), ...] 對應每個配對在原文涵蓋的區間，
-            供後續找出「未被任何欄位涵蓋」的額外文字。"""
+    """逐行解析，回傳 (pairs, extra_lines)。
+    - pairs = [(field, value), ...]（依出現順序）
+    - extra_lines = 未歸屬任何欄位、且非純標籤字的額外文字（如 AT），供併入備注
+    續行處理：沒有標籤的行，若前一欄位可容納換行（_WRAPPABLE）則併回該欄位；
+    否則視為額外文字。純標籤字（如單獨的「备注」）會開啟該欄位以承接下一行的值。"""
     pairs = []
-    spans = []
-    for m in _PAIR_RE.finditer(text or ""):
-        field = _match_field(m.group("lab"))
-        if field is None:
+    extra = []
+    last_field = None  # 最近一個可承接續行的欄位
+    for line in (text or "").splitlines():
+        if not line.strip():
+            last_field = None  # 空行切斷續行
             continue
-        pairs.append((field, m.group("val").strip()))
-        spans.append((m.start(), m.end()))
-    return pairs, spans
-
-
-def _collect_extra(text, spans):
-    """收集『未被任何欄位配對涵蓋』的非空白文字片段（如額外備注、AT 等），
-    作為多行備注回傳，避免被整段丟掉。"""
-    if not text:
-        return []
-    n = len(text)
-    covered = bytearray(n)
-    for s, e in spans:
-        for i in range(s, min(e, n)):
-            covered[i] = 1
-    lines = []
-    buf = []
-
-    def flush():
-        seg = "".join(buf).strip()
-        if seg:
-            lines.append(seg)
-        buf.clear()
-
-    for i, ch in enumerate(text):
-        if covered[i]:
-            flush()  # 遇到已涵蓋文字，先把前面的額外片段收進備注
+        matches = [m for m in _PAIR_RE.finditer(line) if _match_field(m.group("lab"))]
+        if matches:
+            for m in matches:
+                field = _match_field(m.group("lab"))
+                pairs.append((field, m.group("val").strip()))
+                last_field = field
             continue
-        if ch in "\n\r":
-            flush()
+        # 整行是純標籤字（如單獨的「备注」）→ 開啟該欄位承接下一行，本行不留值
+        bare = _BARE_LABEL_RE.match(line)
+        if bare:
+            f = _match_field(bare.group("lab"))
+            last_field = f if f in _WRAPPABLE else None
+            continue
+        # 一般續行文字
+        seg = line.strip()
+        if last_field in _WRAPPABLE:
+            _append_value(pairs, last_field, seg, sep=("；" if last_field == "備注" else ""))
         else:
-            buf.append(ch)
-    flush()
-    return lines
+            extra.append(seg)
+    return pairs, extra
 
 
 def looks_like_booking(text):
@@ -170,7 +174,7 @@ def _norm_date(value):
 def parse_booking_text(text):
     """把訂房文字解析成 fill_booking() 相容的 dict。"""
     raw = {k: "" for k in STANDARD}
-    pairs, spans = _extract_pairs(text)
+    pairs, extra_lines = _extract_pairs(text)
     for field, value in pairs:
         if field == "是否吸煙":
             value = _norm_smoking(value)
@@ -182,9 +186,7 @@ def parse_booking_text(text):
         if value != "" or raw[field] == "":
             raw[field] = value
 
-    # 收集「未被任何欄位涵蓋」的非空白文字（如額外備注、AT 等），併入備注，
-    # 避免整段訂房以外的內容被悄悄丟掉。
-    extra_lines = _collect_extra(text or "", spans)
+    # 未歸屬任何欄位、且非純標籤字的額外文字（如 AT），併入備注，避免被悄悄丟掉。
     if extra_lines:
         extra = "；".join(extra_lines)
         raw["備注"] = (raw["備注"] + "；" + extra).strip("；") if raw["備注"] else extra
