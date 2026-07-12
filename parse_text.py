@@ -132,7 +132,7 @@ def looks_like_booking(text):
 
 def _norm_smoking(value):
     s = (value or "").strip()
-    if any(k in s for k in ("不", "無", "无", "no", "NO", "N", "non")):
+    if any(k in s for k in ("不", "無", "无", "否", "没", "沒", "no", "NO", "N", "non")):
         return "不吸煙"
     return "吸煙"
 
