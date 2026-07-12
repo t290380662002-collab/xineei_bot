@@ -130,13 +130,14 @@ def split_en_name(en: str):
     """把英文姓名拆成 (姓, 名)。
     範例：'QU,SHENZHONG'  -> ('QU', 'SHENZHONG')   （逗號分隔）
           'TANG/QINGPING' -> ('TANG', 'QINGPING')  （斜線分隔，護照常見格式）
+          'ZHOU.YINHUI'   -> ('ZHOU', 'YINHUI')    （點號分隔）
           'SHEN DAN'      -> ('SHEN', 'DAN')        （中文習慣：第一個字是姓）
     """
     en = (en or "").strip()
     if not en:
         return "", ""
-    # 逗號或斜線分隔：前=姓 後=名
-    for sep in (",", "/"):
+    # 逗號 / 斜線 / 點號分隔：前=姓 後=名
+    for sep in (",", "/", "."):
         if sep in en:
             a, b = en.split(sep, 1)
             return a.strip(), b.strip()
