@@ -149,6 +149,16 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def _clear_stale(app):
+    """啟動時先清掉任何殘留的 webhook / 舊 polling 實例，避免 Render 重啟時
+    新舊兩隻同時 polling 造成的 409 Conflict（terminated by other getUpdates）。"""
+    try:
+        await app.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("已清除可能的殘留 webhook / 舊 polling 實例")
+    except Exception as e:
+        logger.warning("清除殘留實例時發生錯誤（可忽略）：%s", e)
+
+
 class BookingTextFilter(filters.BaseFilter):
     """判斷訊息是否為「訂房文字格式」（含至少 4 個可辨識欄位）。"""
 
@@ -204,7 +214,7 @@ def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise SystemExit("請先設定環境變數 TELEGRAM_BOT_TOKEN")
-    app = Application.builder().token(token).build()
+    app = Application.builder().token(token).post_init(_clear_stale).build()
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
@@ -243,7 +253,7 @@ def main():
     )
     app.add_handler(conv)
     logger.info("Bot 啟動中 (polling)...")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
