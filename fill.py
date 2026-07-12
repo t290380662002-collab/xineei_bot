@@ -7,7 +7,7 @@ import re
 import openpyxl
 from io import BytesIO
 from datetime import datetime
-from config import HOTELS, TEMPLATES_DIR, resolve_hotel
+from config import HOTELS, TEMPLATES_DIR, resolve_hotel, BED_GROUPS
 
 # 簡體/繁體 與常見異體字正規化（讓使用者打的簡稱對到模板正式名）
 _CHAR_MAP = {
@@ -54,6 +54,15 @@ def _norm_date(value):
     return s
 
 
+def _cell_by_code(hotel_cfg, code):
+    """依代碼找出對應方框儲存格。"""
+    c = _norm(code)
+    for cell, cd, cn in hotel_cfg["room_types"]:
+        if _norm(cd) == c or c in _norm(cd) or _norm(cd) in c:
+            return cell
+    return None
+
+
 def find_room_cell(hotel_cfg, room_input):
     """根據代碼或中文名（含簡稱/異體字），找出要打勾的方框儲存格。"""
     if not room_input:
@@ -76,7 +85,21 @@ def find_room_cell(hotel_cfg, room_input):
                 continue
             if inpc in ccore or ccore in inpc:
                 return cell
-    # 第三輪：床型關鍵字容錯（双床/雙人床/twin → 雙床套房；大床/king → 大床套房）
+    # 第三輪：床型關鍵字容錯
+    # 先查各飯店專屬 bed_groups（如威尼斯：大床→KC/KP/KD，雙床→TC/TP/TD）
+    hotel_key = None
+    for k, v in HOTELS.items():
+        if v is hotel_cfg:
+            hotel_key = k
+            break
+    if hotel_key and hotel_key in BED_GROUPS:
+        for bed, codes in BED_GROUPS[hotel_key].items():
+            if bed in inp:  # 使用者輸入含「大床」或「雙床」
+                for code in codes:
+                    cell = _cell_by_code(hotel_cfg, code)
+                    if cell:
+                        return cell
+    # 通用床型容錯（双床/雙人床/twin → 含雙床字樣房型；大床/king → 含大床字樣房型）
     bed_rules = [
         (("雙床", "雙人床", "twin", "二人"), ("雙床", "雙人床", "twin")),
         (("大床", "king", "特大床"), ("大床", "king")),
