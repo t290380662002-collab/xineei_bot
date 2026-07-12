@@ -23,16 +23,16 @@ HOTELS = {
         "main_sheet": "Londoner Grand",
         "guest_sheet": "Sheet1",
         "main_cells": {
-            "surname": "B16",    # 姓 Surname
-            "firstname": "H16",  # 名 First Name
-            "patron": "B17",     # 會員號碼 Patron#
-            "idno": "H17",       # 證件號碼 Passport/ID#
-            "dob": "B18",        # 出生日期 DOB
-            "checkin": "B20",    # 入住日期 C/I Date
-            "pax": "M20",        # 人數 Pax
-            "checkout": "B21",   # 退房日期 C/O Date
-            "rooms": "M21",      # 房數 No. of Rooms
-            "remark": "L14",     # 特別要求 Special request
+            "surname": "D16",    # 姓 Surname（填空格 D16:G16）
+            "firstname": "K16",  # 名 First Name（填空格 K16:M16）
+            "patron": "D17",     # 會員號碼 Patron#（填空格 D17:G17，未使用）
+            "idno": "K17",       # 證件號碼 Passport/ID#（填空格 K17:O17）
+            "dob": "D18",        # 出生日期 DOB（填空格 D18:G18）
+            "checkin": "D20",    # 入住日期 C/I Date（填空格 D20:H20）
+            "pax": "O20",        # 人數 Pax（填空格 O20）
+            "checkout": "D21",   # 退房日期 C/O Date（填空格 D21:H21）
+            "rooms": "O21",      # 房數 No. of Rooms（填空格 O21）
+            "remark": "L14",     # 特別要求 Special request（L14:O14 即填空格）
         },
         "guest_first_row": 9,
         "guest_cols": {
@@ -74,16 +74,16 @@ HOTELS = {
         "main_sheet": "Londoner",
         "guest_sheet": "工作表1",
         "main_cells": {
-            "surname": "B16",
-            "firstname": "H16",
-            "patron": "B17",
-            "idno": "H17",
-            "dob": "B18",
-            "checkin": "B20",
-            "pax": "M20",
-            "checkout": "B21",
-            "rooms": "M21",
-            "remark": "L14",
+            "surname": "D16",    # 姓（填空格 D16:G16）
+            "firstname": "K16",  # 名（填空格 K16:M16）
+            "patron": "D17",     # 會員號碼（填空格 D17:G17，未使用）
+            "idno": "K17",       # 證件號碼（填空格 K17:O17）
+            "dob": "D18",        # 出生日期（填空格 D18:G18）
+            "checkin": "D20",    # 入住日期（填空格 D20:H20）
+            "pax": "O20",        # 人數（填空格 O20）
+            "checkout": "D21",   # 退房日期（填空格 D21:H21）
+            "rooms": "O21",      # 房數（填空格 O21）
+            "remark": "L14",     # 特別要求（L14:O14 即填空格）
         },
         "guest_first_row": 3,
         "guest_cols": {
@@ -110,16 +110,16 @@ HOTELS = {
         "main_sheet": "Venetian",
         "guest_sheet": "工作表1",
         "main_cells": {
-            "surname": "B16",
-            "firstname": "H16",
-            "patron": "B17",
-            "idno": "H17",
-            "dob": "B18",
-            "checkin": "B20",
-            "pax": "M20",
-            "checkout": "B21",
-            "rooms": "M21",
-            "remark": "L14",
+            "surname": "D16",    # 姓（填空格 D16:G16）
+            "firstname": "K16",  # 名（填空格 K16:M16）
+            "patron": "D17",     # 會員號碼（填空格 D17:G17，未使用）
+            "idno": "K17",       # 證件號碼（填空格 K17:O17）
+            "dob": "D18",        # 出生日期（填空格 D18:G18）
+            "checkin": "D20",    # 入住日期（填空格 D20:H20）
+            "pax": "O20",        # 人數（填空格 O20）
+            "checkout": "D21",   # 退房日期（填空格 D21:H21）
+            "rooms": "O21",      # 房數（填空格 O21）
+            "remark": "L14",     # 特別要求（L14:O14 即填空格）
         },
         "guest_first_row": 3,
         "guest_cols": {
@@ -160,16 +160,16 @@ HOTELS = {
         "main_sheet": "Parisian",
         "guest_sheet": "Sheet1",
         "main_cells": {
-            "surname": "B16",
-            "firstname": "H16",
-            "patron": "B17",
-            "idno": "H17",
-            "dob": "B18",
-            "checkin": "B20",
-            "pax": "M20",
-            "checkout": "B21",
-            "rooms": "M21",
-            "remark": "L14",
+            "surname": "D16",    # 姓（填空格 D16:G16）
+            "firstname": "K16",  # 名（填空格 K16:M16）
+            "patron": "D17",     # 會員號碼（填空格 D17:G17，未使用）
+            "idno": "K17",       # 證件號碼（填空格 K17:O17）
+            "dob": "D18",        # 出生日期（填空格 D18:G18）
+            "checkin": "D20",    # 入住日期（填空格 D20:H20）
+            "pax": "O20",        # 人數（填空格 O20）
+            "checkout": "D21",   # 退房日期（填空格 D21:H21）
+            "rooms": "O21",      # 房數（填空格 O21）
+            "remark": "L14",     # 特別要求（L14:O14 即填空格）
         },
         "guest_first_row": 2,
         "guest_cols": {
