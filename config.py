@@ -223,12 +223,27 @@ BED_GROUPS = {
 }
 
 
+# 簡體/繁體 與常見異體字正規化（讓使用者打的簡稱對到內部傳統中文 key）
+_HOTEL_CHAR_MAP = {
+    "槟": "檳", "双": "雙", "牀": "床", "烟": "煙",
+    "达": "達", "台": "臺", "伦": "倫", "汇": "匯",
+    "门": "門", "个": "個", "东": "東", "厅": "廳",
+}
+
+
+def _norm_hotel(name: str) -> str:
+    s = str(name or "")
+    for a, b in _HOTEL_CHAR_MAP.items():
+        s = s.replace(a, b)
+    return s.strip()
+
+
 def resolve_hotel(name: str):
-    """把使用者輸入的飯店名對到內部 key。"""
+    """把使用者輸入的飯店名對到內部 key（含簡繁/異體字容錯）。"""
     if not name:
         return None
-    n = name.strip()
+    n = _norm_hotel(name)
     for key in HOTEL_KEYS:
-        if key in n:
+        if _norm_hotel(key) in n or key in n:
             return key
     return None
