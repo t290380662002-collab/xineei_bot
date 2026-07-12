@@ -1,0 +1,19 @@
+# 機密：Bot token 絕對不能上傳
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# 測試產出（非必要程式碼）
+output/
+
+# 本機虛擬環境
+venv/
+env/
+
+# WorkBuddy 專案資料
+.workbuddy/
+
+# 系統
+.DS_Store

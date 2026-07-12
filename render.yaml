@@ -1,0 +1,13 @@
+# Render 部署設定：Telegram 訂房 Bot（Background Worker，免費方案）
+# 部署方式：把本專案推到 GitHub 後，在 Render 後台 New -> Background Worker -> 連接該 repo 即可。
+# TELEGRAM_BOT_TOKEN 請在 Render 後台 Environment 手動設定（不要寫進此檔，避免外洩）。
+services:
+  - type: worker
+    name: booking-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
