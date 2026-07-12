@@ -28,7 +28,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     context.user_data["guests"] = []
     await update.message.reply_text(
-        "開始新訂房 ✏️\n請輸入飯店名稱（名匯 / 威尼斯 / 巴黎人 / 倫敦人）：")
+        "開始新訂房 ✏️\n請輸入飯店名稱（名匯 / 威尼斯 / 巴黎人 / 倫敦人）：",
+        reply_markup=ReplyKeyboardRemove())
     return HOTEL
 
 
@@ -174,7 +175,8 @@ async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"✅ 已讀取文字，但缺少必要欄位：{', '.join(missing)}\n"
             f"請確認文字包含「飯店：/入住：/退房：/入住者中文：…」等欄位，\n"
-            f"或直接輸入 /start 逐步填寫。")
+            f"或直接輸入 /start 逐步填寫。",
+            reply_markup=ReplyKeyboardRemove())
         return ConversationHandler.END
     try:
         bio = fill_booking(booking)
@@ -186,7 +188,9 @@ async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("文字產檔失敗")
         await update.message.reply_text(f"❌ 產檔失敗：{e}")
     context.user_data.clear()
-    await update.message.reply_text("如需再填一筆，請輸入 /start 或再次貼上訂房文字。")
+    await update.message.reply_text(
+        "如需再填一筆，請輸入 /start 或再次貼上訂房文字。",
+        reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
 
