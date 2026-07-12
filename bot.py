@@ -253,7 +253,52 @@ def main():
     )
     app.add_handler(conv)
     logger.info("Bot 啟動中 (polling)...")
-    app.run_polling(drop_pending_updates=True)
+    _run_with_retry(app)
+
+
+import asyncio
+from telegram.error import Conflict
+
+
+def _run_with_retry(app, max_retries=50):
+    """啟動 polling；若遇到 409 衝突（有其他實例同時 polling），
+    等 10 秒後重啟，直到成功或超過重試上限。這讓 Bot 在 Render 重新部署、
+    新舊實例短暂並存時能自動恢復，不會永久卡死。"""
+    asyncio.run(_poll_loop(app, max_retries))
+
+
+async def _poll_loop(app, max_retries):
+    await app.initialize()
+    attempt = 0
+    while attempt < max_retries:
+        try:
+            await app.start()
+            await app.updater.start_polling(drop_pending_updates=True)
+            logger.info("polling 已啟動，等待訊息…")
+            # 持續等待，直到 updater 因停止或衝突而結束
+            while app.updater.running:
+                await asyncio.sleep(1)
+            break  # 正常結束（收到停止信號）
+        except Conflict:
+            attempt += 1
+            logger.warning(
+                "偵測到 409 衝突（可能存在其他 Bot 實例），10 秒後重試 (%d/%d)…",
+                attempt, max_retries)
+            try:
+                await app.updater.stop()
+            except Exception:
+                pass
+            try:
+                await app.stop()
+            except Exception:
+                pass
+            await asyncio.sleep(10)
+    else:
+        logger.error("已達重試上限，Bot 停止。請檢查是否有多個實例同時運行。")
+    try:
+        await app.shutdown()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
