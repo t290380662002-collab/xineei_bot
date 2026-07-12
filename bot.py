@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 訂房 Telegram Bot
-流程：/start -> 飯店 -> 入住 -> 退房 -> 房型 -> 房數 -> 備注 -> 吸煙
+兩種輸入方式（自動判斷）：
+  A. 貼上訂房文字格式（入住：/退房：/飯店：/房型：/件數：/備注：/是否吸煙：/入住者中文：…）
+     -> 自動解析 -> 產生 Excel 回傳
+  B. /start -> 逐步對話：飯店 -> 入住 -> 退房 -> 房型 -> 房數 -> 備注 -> 吸煙
      -> 逐位入住者(中文/英文/出生/證件) -> 可加多位 -> 產生 Excel 回傳
 每筆都產生獨立的新 Excel 檔，直接回傳給使用者下載。
 """
@@ -13,6 +16,7 @@ from telegram.ext import (
     ConversationHandler, filters,
 )
 from fill import fill_booking, output_filename
+from parse_text import parse_booking_text, looks_like_booking
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -152,6 +156,48 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+class BookingTextFilter(filters.BaseFilter):
+    """判斷訊息是否為「訂房文字格式」（含至少 4 個可辨識欄位）。"""
+
+    def filter(self, update):
+        msg = update.effective_message
+        if not msg or not msg.text:
+            return False
+        return looks_like_booking(msg.text)
+
+
+async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """直接貼上訂房文字 → 解析 → 產生 Excel 回傳。"""
+    booking = parse_booking_text(update.message.text)
+    missing = []
+    if not booking.get("飯店"):
+        missing.append("飯店")
+    if not booking.get("入住"):
+        missing.append("入住")
+    if not booking.get("退房"):
+        missing.append("退房")
+    if not booking.get("guests"):
+        missing.append("入住者資料(中文/英文/出生/證件)")
+    if missing:
+        await update.message.reply_text(
+            f"✅ 已讀取文字，但缺少必要欄位：{', '.join(missing)}\n"
+            f"請確認文字包含「飯店：/入住：/退房：/入住者中文：…」等欄位，\n"
+            f"或直接輸入 /start 逐步填寫。")
+        return ConversationHandler.END
+    try:
+        bio = fill_booking(booking)
+        fn = output_filename(booking)
+        await update.message.reply_document(
+            document=bio, filename=fn,
+            caption="✅ 已從文字自動填入，訂房 Excel 請下載：")
+    except Exception as e:
+        logger.exception("文字產檔失敗")
+        await update.message.reply_text(f"❌ 產檔失敗：{e}")
+    context.user_data.clear()
+    await update.message.reply_text("如需再填一筆，請輸入 /start 或再次貼上訂房文字。")
+    return ConversationHandler.END
+
+
 def main():
     # 本機開發時從 .env 讀取 token；正式部署請用環境變數設定
     try:
@@ -164,7 +210,10 @@ def main():
         raise SystemExit("請先設定環境變數 TELEGRAM_BOT_TOKEN")
     app = Application.builder().token(token).build()
     conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            MessageHandler(BookingTextFilter(), text_entry),
+        ],
         states={
             HOTEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, hotel)],
             CHECKIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, checkin)],
