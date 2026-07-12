@@ -76,6 +76,17 @@ def find_room_cell(hotel_cfg, room_input):
                 continue
             if inpc in ccore or ccore in inpc:
                 return cell
+    # 第三輪：床型關鍵字容錯（双床/雙人床/twin → 雙床套房；大床/king → 大床套房）
+    bed_rules = [
+        (("雙床", "雙人床", "twin", "二人"), ("雙床", "雙人床", "twin")),
+        (("大床", "king", "特大床"), ("大床", "king")),
+    ]
+    for keys, hits in bed_rules:
+        if any(k in inp for k in keys):
+            for cell, code, cn in hotel_cfg["room_types"]:
+                cn_n = _norm(cn or "")
+                if any(h in cn_n for h in hits):
+                    return cell
     return None
 
 

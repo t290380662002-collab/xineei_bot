@@ -50,10 +50,12 @@ ALIASES = {
 # 所有可用作「標籤」的字串（標準欄位 + 別名），用於整段掃描
 _ALL = sorted(set(STANDARD + list(ALIASES.keys())), key=len, reverse=True)
 _LABEL_ALT = "|".join(re.escape(k) for k in _ALL)
-# 掃描整段：捕捉 標籤[:：=]值，值到「下一個標籤」或文末為止（容錯換行消失）
+# 掃描整段：捕捉 標籤[:：=]值，值到「下一個標籤」或「換行/文末」為止。
+# 注意：不使用 DOTALL，讓「值」不跨行，避免最後一個欄位把文末多餘文字
+#       （例如備注以外的內容）整段吞進去、污染該欄位（如證件號碼）。
 _PAIR_RE = re.compile(
-    r"(?P<lab>" + _LABEL_ALT + r")[:：=＝]\s*(?P<val>.*?)(?=(?P<lab2>" + _LABEL_ALT + r")[:：=＝]|\Z)",
-    re.DOTALL,
+    r"(?P<lab>" + _LABEL_ALT + r")[:：=＝]\s*(?P<val>.*?)(?=(?P<lab2>" + _LABEL_ALT + r")[:：=＝]|\n|\r|\Z)",
+    re.MULTILINE,
 )
 
 
@@ -69,21 +71,58 @@ def _match_field(label):
 
 
 def _extract_pairs(text):
-    """回傳 [(field, value), ...]，順序依文中出現順序。"""
+    """回傳 (pairs, spans)。
+    pairs = [(field, value), ...]（依文中出現順序）；
+    spans = [(start, end), ...] 對應每個配對在原文涵蓋的區間，
+            供後續找出「未被任何欄位涵蓋」的額外文字。"""
     pairs = []
+    spans = []
     for m in _PAIR_RE.finditer(text or ""):
         field = _match_field(m.group("lab"))
         if field is None:
             continue
         pairs.append((field, m.group("val").strip()))
-    return pairs
+        spans.append((m.start(), m.end()))
+    return pairs, spans
+
+
+def _collect_extra(text, spans):
+    """收集『未被任何欄位配對涵蓋』的非空白文字片段（如額外備注、AT 等），
+    作為多行備注回傳，避免被整段丟掉。"""
+    if not text:
+        return []
+    n = len(text)
+    covered = bytearray(n)
+    for s, e in spans:
+        for i in range(s, min(e, n)):
+            covered[i] = 1
+    lines = []
+    buf = []
+
+    def flush():
+        seg = "".join(buf).strip()
+        if seg:
+            lines.append(seg)
+        buf.clear()
+
+    for i, ch in enumerate(text):
+        if covered[i]:
+            flush()  # 遇到已涵蓋文字，先把前面的額外片段收進備注
+            continue
+        if ch in "\n\r":
+            flush()
+        else:
+            buf.append(ch)
+    flush()
+    return lines
 
 
 def looks_like_booking(text):
     """是否像一筆訂房文字（至少含 4 個可辨識欄位才當作訂房）。"""
     if not text:
         return False
-    found = sum(1 for f, _ in _extract_pairs(text))
+    pairs, _ = _extract_pairs(text)
+    found = sum(1 for f, _ in pairs)
     return found >= 4
 
 
@@ -131,7 +170,8 @@ def _norm_date(value):
 def parse_booking_text(text):
     """把訂房文字解析成 fill_booking() 相容的 dict。"""
     raw = {k: "" for k in STANDARD}
-    for field, value in _extract_pairs(text):
+    pairs, spans = _extract_pairs(text)
+    for field, value in pairs:
         if field == "是否吸煙":
             value = _norm_smoking(value)
         elif field == "件數":
@@ -141,6 +181,13 @@ def parse_booking_text(text):
         # 不要讓「空值」覆寫掉先前已解析出的非空值
         if value != "" or raw[field] == "":
             raw[field] = value
+
+    # 收集「未被任何欄位涵蓋」的非空白文字（如額外備注、AT 等），併入備注，
+    # 避免整段訂房以外的內容被悄悄丟掉。
+    extra_lines = _collect_extra(text or "", spans)
+    if extra_lines:
+        extra = "；".join(extra_lines)
+        raw["備注"] = (raw["備注"] + "；" + extra).strip("；") if raw["備注"] else extra
 
     guests = []
     if raw.get("入住者中文") or raw.get("入住者英文") or raw.get("證件號碼"):
