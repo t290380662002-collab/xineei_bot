@@ -6,27 +6,76 @@
 import re
 import openpyxl
 from io import BytesIO
+from datetime import datetime
 from config import HOTELS, TEMPLATES_DIR, resolve_hotel
+
+# 簡體/繁體 與常見異體字正規化（讓使用者打的簡稱對到模板正式名）
+_CHAR_MAP = {
+    "槟": "檳", "双": "雙", "牀": "床", "烟": "煙",
+    "达": "達", "台": "臺",
+}
+# 房型名中的泛詞（去掉後比對核心字，提升簡稱命中率）
+# 注意：不要用會把整個名稱拆光的詞（如「客房」「房」「铁塔」），
+#       否則核心變成空字串，空字串是任何字串的子串會全部誤命中。
+_GENERIC = [
+    "套房", "大床", "雙床", "雙人床", "人", "典雅",
+    "景觀", "金光景", "尊貴", "豪華", "泳池", "有泳池", "-",
+]
 
 
 def _norm(s):
-    return re.sub(r"\s+", "", str(s)).lower()
+    s = str(s)
+    for a, b in _CHAR_MAP.items():
+        s = s.replace(a, b)
+    return re.sub(r"\s+", "", s).lower()
+
+
+def _core(s):
+    s = _norm(s)
+    for g in _GENERIC:
+        s = s.replace(g, "")
+    return s
+
+
+def _norm_date(value):
+    s = re.sub(r"\s+", "", str(value or "")).strip()
+    if not s:
+        return ""
+    m = re.match(r"^(\d{4})[./\-](\d{1,2})[./\-](\d{1,2})$", s)
+    if m:
+        y, mo, d = m.groups()
+        return f"{int(y):04d}/{int(mo):02d}/{int(d):02d}"
+    m = re.match(r"^(\d{1,2})月(\d{1,2})日?$", s)
+    if m:
+        return f"{datetime.now().year:04d}/{int(m.group(1)):02d}/{int(m.group(2)):02d}"
+    m = re.match(r"^(\d{1,2})[./\-](\d{1,2})$", s)
+    if m:
+        return f"{datetime.now().year:04d}/{int(m.group(1)):02d}/{int(m.group(2)):02d}"
+    return s
 
 
 def find_room_cell(hotel_cfg, room_input):
-    """根據代碼或中文名，找出要打勾的方框儲存格。"""
+    """根據代碼或中文名（含簡稱/異體字），找出要打勾的方框儲存格。"""
     if not room_input:
         return None
+    room_input = re.sub(r"[（）()]", "", str(room_input))  # 去掉括號註記
     inp = _norm(room_input)
     # 第一輪：用代碼比對（最精準）
     for cell, code, cn in hotel_cfg["room_types"]:
         c = _norm(code)
         if c == inp or c in inp or inp in c:
             return cell
-    # 第二輪：用中文名比對
-    for cell, code, cn in hotel_cfg["room_types"]:
-        if cn and (cn in room_input or room_input in cn):
-            return cell
+    # 第二輪：用中文名「核心字」比對（去泛詞 + 異體字正規化）
+    inpc = _core(room_input)
+    if inpc:
+        for cell, code, cn in hotel_cfg["room_types"]:
+            if not cn:
+                continue
+            ccore = _core(cn)
+            if not ccore:
+                continue
+            if inpc in ccore or ccore in inpc:
+                return cell
     return None
 
 
@@ -91,9 +140,9 @@ def fill_booking(booking: dict) -> BytesIO:
     mws[mc["surname"]] = sur
     mws[mc["firstname"]] = fir
     mws[mc["idno"]] = primary.get("idno", "")
-    mws[mc["dob"]] = primary.get("dob", "")
-    mws[mc["checkin"]] = booking.get("入住", "")
-    mws[mc["checkout"]] = booking.get("退房", "")
+    mws[mc["dob"]] = _norm_date(primary.get("dob", ""))
+    mws[mc["checkin"]] = _norm_date(booking.get("入住", ""))
+    mws[mc["checkout"]] = _norm_date(booking.get("退房", ""))
     mws[mc["rooms"]] = booking.get("件數", "")
     mws[mc["pax"]] = len(guests)
 
@@ -105,15 +154,18 @@ def fill_booking(booking: dict) -> BytesIO:
         remark = (remark + f"；吸煙狀態：{smoking}").strip("；")
     mws[mc["remark"]] = remark
 
-    # 房型方框打勾
-    room_cell = find_room_cell(cfg, booking.get("房型", ""))
-    if room_cell:
-        check_box(mws, room_cell)
-    else:
+    # 房型方框打勾（支援 / 、、, 分隔的多房型同時打勾）
+    room_raw = booking.get("房型", "")
+    segs = [s.strip("（）() ") for s in re.split(r"[/、,，;；]", room_raw) if s.strip()]
+    matched = False
+    for seg in segs:
+        cell = find_room_cell(cfg, seg)
+        if cell:
+            check_box(mws, cell)
+            matched = True
+    if not matched and room_raw:
         # 找不到對應房型，記到備注提醒
-        rt = booking.get("房型", "")
-        if rt:
-            mws[mc["remark"]] = (remark + f"；[房型未對應：{rt}]").strip("；")
+        mws[mc["remark"]] = (remark + f"；[房型未對應：{room_raw}]").strip("；")
 
     # ---- 客人清單 ----
     gws = wb[cfg["guest_sheet"]]
