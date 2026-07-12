@@ -64,18 +64,40 @@ def _cell_by_code(hotel_cfg, code):
     return None
 
 
-def find_room_cell(hotel_cfg, room_input):
-    """根據代碼或中文名（含簡稱/異體字），找出要打勾的方框儲存格。"""
+def find_room_cells(hotel_cfg, room_input):
+    """根據代碼或中文名（含簡稱/異體字），找出要打勾的方框儲存格（可多格）。
+
+    多數情況回傳單一格；但若命中飯店專屬床型群組（BED_GROUPS，如威尼斯
+    大床→KC/KP/KD、雙床→TC/TP/TD），則回傳該群組所有存在的格子（全部打勾）。
+    回傳 list（可能空）。"""
     if not room_input:
-        return None
+        return []
     room_input = re.sub(r"[（）()]", "", str(room_input))  # 去掉括號註記
     inp = _norm(room_input)
     # 第一輪：用代碼比對（最精準）
     for cell, code, cn in hotel_cfg["room_types"]:
         c = _norm(code)
         if c == inp or c in inp or inp in c:
-            return cell
-    # 第二輪：用中文名「核心字」比對（去泛詞 + 異體字正規化）
+            return [cell]
+    # 第二輪：飯店專屬床型群組（BED_GROUPS）——只要輸入含「大床/雙床」關鍵字，
+    # 就回傳該群組所有格子全部打勾（優先於中文名比對，避免「貝麗套房（雙床）」
+    # 被單一房型名攔成一格；簡繁輸入行為一致）。
+    hotel_key = None
+    for k, v in HOTELS.items():
+        if v is hotel_cfg:
+            hotel_key = k
+            break
+    if hotel_key and hotel_key in BED_GROUPS:
+        for bed, codes in BED_GROUPS[hotel_key].items():
+            if bed in inp:  # 使用者輸入含「大床」或「雙床」
+                cells = []
+                for code in codes:
+                    cell = _cell_by_code(hotel_cfg, code)
+                    if cell and cell not in cells:
+                        cells.append(cell)
+                if cells:
+                    return cells
+    # 第三輪：用中文名「核心字」比對（去泛詞 + 異體字正規化）
     inpc = _core(room_input)
     if inpc:
         for cell, code, cn in hotel_cfg["room_types"]:
@@ -85,22 +107,8 @@ def find_room_cell(hotel_cfg, room_input):
             if not ccore:
                 continue
             if inpc in ccore or ccore in inpc:
-                return cell
-    # 第三輪：床型關鍵字容錯
-    # 先查各飯店專屬 bed_groups（如威尼斯：大床→KC/KP/KD，雙床→TC/TP/TD）
-    hotel_key = None
-    for k, v in HOTELS.items():
-        if v is hotel_cfg:
-            hotel_key = k
-            break
-    if hotel_key and hotel_key in BED_GROUPS:
-        for bed, codes in BED_GROUPS[hotel_key].items():
-            if bed in inp:  # 使用者輸入含「大床」或「雙床」
-                for code in codes:
-                    cell = _cell_by_code(hotel_cfg, code)
-                    if cell:
-                        return cell
-    # 通用床型容錯（双床/雙人床/twin → 含雙床字樣房型；大床/king → 含大床字樣房型）
+                return [cell]
+    # 第四輪：通用床型容錯（双床/雙人床/twin → 含雙床字樣房型；大床/king → 含大床字樣房型）
     bed_rules = [
         (("雙床", "雙人床", "twin", "二人"), ("雙床", "雙人床", "twin")),
         (("大床", "king", "特大床"), ("大床", "king")),
@@ -110,8 +118,14 @@ def find_room_cell(hotel_cfg, room_input):
             for cell, code, cn in hotel_cfg["room_types"]:
                 cn_n = _norm(cn or "")
                 if any(h in cn_n for h in hits):
-                    return cell
-    return None
+                    return [cell]
+    return []
+
+
+def find_room_cell(hotel_cfg, room_input):
+    """相容舊呼叫：回傳單一格（取第一個），無則 None。"""
+    cells = find_room_cells(hotel_cfg, room_input)
+    return cells[0] if cells else None
 
 
 def check_box(ws, cell_ref):
@@ -198,8 +212,7 @@ def fill_booking(booking: dict) -> BytesIO:
     segs = [s.strip("（）() ") for s in re.split(r"[/、,，;；]", room_raw) if s.strip()]
     matched = False
     for seg in segs:
-        cell = find_room_cell(cfg, seg)
-        if cell:
+        for cell in find_room_cells(cfg, seg):
             check_box(mws, cell)
             matched = True
     if not matched and room_raw:
