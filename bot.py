@@ -10,7 +10,7 @@
 """
 import os
 import logging
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardRemove
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, ContextTypes,
     ConversationHandler, filters,
@@ -23,21 +23,12 @@ logger = logging.getLogger(__name__)
 
 HOTEL, CHECKIN, CHECKOUT, ROOMTYPE, ROOMS, REMARK, SMOKING, CN, EN, DOB, IDNO, MORE = range(12)
 
-HOTEL_KB = ReplyKeyboardMarkup(
-    [["名匯", "威尼斯", "巴黎人", "倫敦人"]],
-    one_time_keyboard=True, resize_keyboard=True,
-)
-MORE_KB = ReplyKeyboardMarkup(
-    [["➕ 還有下一位", "✅ 完成，產生 Excel"]],
-    resize_keyboard=True,
-)
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     context.user_data["guests"] = []
     await update.message.reply_text(
-        "開始新訂房 ✏️\n請選擇飯店：", reply_markup=HOTEL_KB)
+        "開始新訂房 ✏️\n請輸入飯店名稱（名匯 / 威尼斯 / 巴黎人 / 倫敦人）：")
     return HOTEL
 
 
@@ -117,8 +108,7 @@ async def idno(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     n = len(context.user_data["guests"])
     await update.message.reply_text(
-        f"✅ 已加入第 {n} 位入住者。\n要再加下一位，還是完成產檔？",
-        reply_markup=MORE_KB)
+        f"✅ 已加入第 {n} 位入住者。\n輸入「完成」產生 Excel，或輸入「下一個」繼續新增入住者：")
     return MORE
 
 
@@ -146,13 +136,15 @@ async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("產檔失敗")
         await update.message.reply_text(f"❌ 產檔失敗：{e}")
     context.user_data.clear()
-    await update.message.reply_text("如需再填一筆，請輸入 /start")
+    await update.message.reply_text(
+        "如需再填一筆，請輸入 /start", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("已取消。輸入 /start 重新開始。")
+    await update.message.reply_text(
+        "已取消。輸入 /start 重新開始。", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
 
