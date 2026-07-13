@@ -199,9 +199,6 @@ async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("文字產檔失敗")
         await update.message.reply_text(f"❌ 產檔失敗：{e}")
     context.user_data.clear()
-    await update.message.reply_text(
-        "如需再填一筆，請輸入 /start 或再次貼上訂房文字。",
-        reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
 
