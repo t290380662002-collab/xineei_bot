@@ -33,6 +33,7 @@ HOTELS = {
             "checkout": "D21",   # 退房日期 C/O Date（填空格 D21:H21）
             "rooms": "O21",      # 房數 No. of Rooms（填空格 O21）
             "remark": "L14",     # 特別要求 Special request（L14:O14 即填空格）
+            "date": "L29",       # 填表日期 Date（L29 為 Date: 右側填空格）
         },
         "guest_first_row": 9,
         "guest_cols": {
@@ -84,6 +85,7 @@ HOTELS = {
             "checkout": "D21",   # 退房日期（填空格 D21:H21）
             "rooms": "O21",      # 房數（填空格 O21）
             "remark": "L14",     # 特別要求（L14:O14 即填空格）
+            "date": "L30",       # 填表日期 Date（L30 為 Date: 右側填空格）
         },
         "guest_first_row": 3,
         "guest_cols": {
@@ -120,6 +122,7 @@ HOTELS = {
             "checkout": "D21",   # 退房日期（填空格 D21:H21）
             "rooms": "O21",      # 房數（填空格 O21）
             "remark": "L14",     # 特別要求（L14:O14 即填空格）
+            "date": "L30",       # 填表日期 Date（L30 為 Date: 右側填空格）
         },
         "guest_first_row": 3,
         "guest_cols": {
@@ -170,6 +173,7 @@ HOTELS = {
             "checkout": "D21",   # 退房日期（填空格 D21:H21）
             "rooms": "O21",      # 房數（填空格 O21）
             "remark": "L14",     # 特別要求（L14:O14 即填空格）
+            "date": "L31",       # 填表日期 Date（L31 為 Date: 右側填空格）
         },
         "guest_first_row": 2,
         "guest_cols": {

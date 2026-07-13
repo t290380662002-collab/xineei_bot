@@ -161,6 +161,16 @@ def split_en_name(en: str):
     return "", en
 
 
+def _set_merged_cell(ws, coord, value):
+    """安全寫入儲存格；若 coord 位於合併儲存格內，則改寫該合併範圍左上角那一格。"""
+    r, c = openpyxl.utils.coordinate_to_tuple(coord)
+    for rng in ws.merged_cells.ranges:
+        if rng.min_row <= r <= rng.max_row and rng.min_col <= c <= rng.max_col:
+            coord = f"{openpyxl.utils.get_column_letter(rng.min_col)}{rng.min_row}"
+            break
+    ws[coord] = value
+
+
 def fill_booking(booking: dict) -> BytesIO:
     """
     booking 結構：
@@ -198,6 +208,13 @@ def fill_booking(booking: dict) -> BytesIO:
     mws[mc["checkout"]] = _norm_date(booking.get("退房", ""))
     mws[mc["rooms"]] = booking.get("件數", "")
     mws[mc["pax"]] = len(guests)
+
+    # 填表日期（右上角 Date: 後面的空格；若 Date: 與空格在同一合併格，保留標籤並追加日期）
+    if "date" in mc:
+        date_label = mws[mc["date"]].value or "Date: "
+        if not re.search(r"Date[：:]?\s*$", date_label, re.IGNORECASE):
+            date_label = "Date: "
+        _set_merged_cell(mws, mc["date"], f"{date_label}{datetime.now().strftime('%Y/%m/%d')}")
 
     # 備注 + 吸煙
     remark = (booking.get("備注", "") or "").strip()
