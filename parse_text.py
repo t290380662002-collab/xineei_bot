@@ -63,6 +63,22 @@ _BARE_LABEL_RE = re.compile(r"^\s*(?P<lab>" + _LABEL_ALT + r")\s*$")
 #   房型 / 飯店 / 姓名 直接接續；備注 用「；」分隔。
 _WRAPPABLE = {"房型", "飯店", "入住者中文", "入住者英文", "備注"}
 
+# 這些獨立代碼不寫入備注（使用者指定：SS / AT / WW / MM 等標記）。
+# 比對時前後不能緊鄰英文字母（避免誤刪像 ASS 之類的字），但可緊鄰中文。
+SKIP_TOKENS = {"SS", "AT", "WW", "MM"}
+_SKIP_RE = re.compile(
+    r"(?<![A-Za-z])(" + "|".join(re.escape(t) for t in SKIP_TOKENS) + r")(?![A-Za-z])",
+    re.IGNORECASE,
+)
+
+
+def _clean_remark(s):
+    """移除備注中的黑名單代碼（SS/AT/WW/MM…），並正規化空白與分隔符。"""
+    s = _SKIP_RE.sub("", s or "")
+    s = re.sub(r"[\s；;]+", "；", s).strip("；; ").strip()
+    return s
+
+
 
 def _match_field(label):
     key = label.strip()
@@ -115,9 +131,16 @@ def _extract_pairs(text):
         # 一般續行文字
         seg = line.strip()
         if last_field in _WRAPPABLE:
-            _append_value(pairs, last_field, seg, sep=("；" if last_field == "備注" else ""))
+            if last_field == "備注":
+                cleaned = _clean_remark(seg)
+                if cleaned:
+                    _append_value(pairs, last_field, cleaned, sep="；")
+            else:
+                _append_value(pairs, last_field, seg, sep="")
         else:
-            extra.append(seg)
+            cleaned = _clean_remark(seg)
+            if cleaned:
+                extra.append(cleaned)
     return pairs, extra
 
 
@@ -182,6 +205,8 @@ def parse_booking_text(text):
             value = _norm_rooms(value)
         elif field in ("入住", "退房", "出生年月日"):
             value = _norm_date(value)
+        elif field == "備注":
+            value = _clean_remark(value)
         # 不要讓「空值」覆寫掉先前已解析出的非空值
         if value != "" or raw[field] == "":
             raw[field] = value
