@@ -219,12 +219,9 @@ def fill_booking(booking: dict) -> BytesIO:
     mws[mc["rooms"]] = booking.get("件數", "")
     mws[mc["pax"]] = len(guests)
 
-    # 填表日期（右上角 Date: 後面的空格；若 Date: 與空格在同一合併格，保留標籤並追加日期）
+    # 填表日期（右下角 Date: 後面的底線格；只填日期值，保留模板藍色字體格式）
     if "date" in mc:
-        date_label = mws[mc["date"]].value or "Date: "
-        if not re.search(r"Date[：:]?\s*$", date_label, re.IGNORECASE):
-            date_label = "Date: "
-        _set_merged_cell(mws, mc["date"], f"{date_label}{datetime.now().strftime('%Y/%m/%d')}")
+        _set_merged_cell(mws, mc["date"], datetime.now().strftime('%Y/%m/%d'))
 
     # 備注 + 吸煙
     remark = (booking.get("備注", "") or "").strip()
