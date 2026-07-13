@@ -227,8 +227,8 @@ def fill_booking(booking: dict) -> BytesIO:
     remark = (booking.get("備注", "") or "").strip()
     smoking = (booking.get("是否吸煙", "") or "").strip()
     if smoking and hotel_key != "名匯":
-        # 名匯有專屬「不吸煙」欄，其他家把吸煙資訊併入備注
-        remark = (remark + f"；吸煙狀態：{smoking}").strip("；")
+        # 名匯有專屬「不吸煙」欄，其他家把吸煙資訊併入備注（只寫「不吸煙」/「吸煙」）
+        remark = (remark + f"；{smoking}").strip("；")
 
     # 房型方框打勾（支援 / 、、, 分隔的多房型同時打勾）
     room_raw = booking.get("房型", "")
