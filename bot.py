@@ -17,6 +17,7 @@ from telegram.ext import (
 )
 from fill import fill_booking, output_filename
 from parse_text import parse_booking_text, looks_like_booking
+from config import HOTEL_KEYS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     context.user_data["guests"] = []
     await update.message.reply_text(
-        "開始新訂房 ✏️\n請輸入飯店名稱（名匯 / 威尼斯 / 巴黎人 / 倫敦人）：",
+        "開始新訂房 ✏️\n請輸入飯店名稱（" + " / ".join(HOTEL_KEYS) + "）：",
         reply_markup=ReplyKeyboardRemove())
     return HOTEL
 

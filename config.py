@@ -15,7 +15,7 @@ from pathlib import Path
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 # 飯店中文名 -> 內部 key（用來比對使用者輸入的「飯店」欄位）
-HOTEL_KEYS = ["名匯", "威尼斯", "巴黎人", "倫敦人"]
+HOTEL_KEYS = ["名匯", "威尼斯", "巴黎人", "倫敦人", "御園"]
 
 HOTELS = {
     "名匯": {
@@ -213,6 +213,44 @@ HOTELS = {
             ("K30", "SPMAK1+TP", "尊貴馬賽套房+尊貴豪華雙人床客房"),
         ],
     },
+
+    "御園": {
+        "file": "御園-空白檔.xlsx",
+        "main_sheet": "Londoner Court",
+        "guest_sheet": "Sheet1",
+        "main_cells": {
+            "surname": "D16",    # 姓 Surname（填空格 D16:G16）
+            "firstname": "K16",  # 名 First Name（填空格 K16:M16）
+            "patron": "D17",     # 會員號碼 Patron#（填空格 D17:G17，未使用）
+            "idno": "K17",       # 證件號碼 Passport/ID#（填空格 K17:O17）
+            "dob": "D18",        # 出生日期 DOB（填空格 D18:G18）
+            "checkin": "D20",    # 入住日期 C/I Date（填空格 D20:H20）
+            "pax": "O20",        # 人數 Pax（填空格 O20）
+            "checkout": "D21",   # 退房日期 C/O Date（填空格 D21:H21）
+            "rooms": "O21",      # 房數 No.of Rooms（填空格 O21）
+            "remark": "L14",     # 特別要求 Special request（L14:O14 含標籤，寫入時保留標籤）
+            "date": "K30",       # 填表日期 Date（K30:M30 含 Date: 標籤）
+        },
+        "guest_first_row": 3,
+        "guest_cols": {
+            "cn_name": "A",   # 中文姓名
+            "en_name": "B",   # 英文姓名
+            "idno": "C",      # 證件號碼
+            "dob": "D",       # 出生日期
+        },
+        "room_types": [
+            ("C24", "CM1", "梅費爾套房"),
+            ("G24", "CK2", "騎士橋套房"),
+            ("K24", "CV3", "天御别墅（三卧室）"),
+            ("N24", "CVS4", "天御别墅（四卧室）"),
+            ("C25", "CMD1", "豪華梅費爾套房"),
+            ("G25", "CKD2", "豪華騎士橋套房"),
+            ("K25", "CVS3", "天御别墅（三卧室）"),
+            ("N25", "CVG4", "天御别墅（四卧室）"),
+            ("C26", "CG1", "御景套房"),
+            ("C27", "CGD1", "豪華禦景套房"),
+        ],
+    },
 }
 
 # 各飯店床型群組：當使用者只說「大床」「雙床」而沒指定具體房型時，
@@ -232,6 +270,7 @@ _HOTEL_CHAR_MAP = {
     "槟": "檳", "双": "雙", "牀": "床", "烟": "煙",
     "达": "達", "台": "臺", "伦": "倫", "汇": "匯",
     "门": "門", "个": "個", "东": "東", "厅": "廳",
+    "园": "園",
 }
 
 

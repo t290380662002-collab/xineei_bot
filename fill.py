@@ -14,18 +14,22 @@ _CHAR_MAP = {
     "槟": "檳", "双": "雙", "牀": "床", "烟": "煙",
     "达": "達", "台": "臺", "伦": "倫", "汇": "匯",
     "门": "門", "个": "個", "东": "東", "厅": "廳",
+    "园": "園",
 }
 # 房型名中的泛詞（去掉後比對核心字，提升簡稱命中率）
 # 注意：不要用會把整個名稱拆光的詞（如「客房」「房」「铁塔」），
 #       否則核心變成空字串，空字串是任何字串的子串會全部誤命中。
+# 也不放「豪華/尊貴」等前綴詞：否則「梅費爾套房」與「豪華梅費爾套房」
+#       會被摺成同一核心字而誤命中（交由第三輪 exact-first 處理）。
 _GENERIC = [
     "套房", "大床", "雙床", "雙人床", "人", "典雅",
-    "景觀", "金光景", "尊貴", "豪華", "泳池", "有泳池", "-",
+    "景觀", "金光景", "尊貴", "泳池", "有泳池", "-",
 ]
 
 
 def _norm(s):
     s = str(s)
+    s = re.sub(r"[（）()]", "", s)  # 去掉全/半形括號（房型註記如「天御别墅（四卧室）」）
     for a, b in _CHAR_MAP.items():
         s = s.replace(a, b)
     return re.sub(r"\s+", "", s).lower()
@@ -100,6 +104,12 @@ def find_room_cells(hotel_cfg, room_input):
     # 第三輪：用中文名「核心字」比對（去泛詞 + 異體字正規化）
     inpc = _core(room_input)
     if inpc:
+        # 先找核心字「完全相等」者（最精準）。
+        # 可避免「梅費爾套房」被「豪華梅費爾套房」的 prefix 子串干擾而誤命中基礎房型；
+        # 也避免「天御别墅（四卧室）」因模板重複顯示名而一次勾到兩格（多筆時退回子串取第一筆）。
+        exact = [cell for cell, code, cn in hotel_cfg["room_types"] if cn and _core(cn) == inpc]
+        if len(exact) == 1:
+            return exact
         for cell, code, cn in hotel_cfg["room_types"]:
             if not cn:
                 continue
@@ -222,7 +232,6 @@ def fill_booking(booking: dict) -> BytesIO:
     if smoking and hotel_key != "名匯":
         # 名匯有專屬「不吸煙」欄，其他家把吸煙資訊併入備注
         remark = (remark + f"；吸煙狀態：{smoking}").strip("；")
-    mws[mc["remark"]] = remark
 
     # 房型方框打勾（支援 / 、、, 分隔的多房型同時打勾）
     room_raw = booking.get("房型", "")
@@ -234,7 +243,15 @@ def fill_booking(booking: dict) -> BytesIO:
             matched = True
     if not matched and room_raw:
         # 找不到對應房型，記到備注提醒
-        mws[mc["remark"]] = (remark + f"；[房型未對應：{room_raw}]").strip("；")
+        remark = (remark + f"；[房型未對應：{room_raw}]").strip("；")
+
+    # 寫入備注：若該格原本就含欄位標籤（如「特別要求 Special request :」），
+    # 保留標籤並把實際備注接在後面，避免覆蓋掉欄位名稱。
+    existing = mws[mc["remark"]].value
+    if existing and str(existing).strip():
+        mws[mc["remark"]] = f"{existing}{remark}" if remark else existing
+    else:
+        mws[mc["remark"]] = remark
 
     # ---- 客人清單 ----
     gws = wb[cfg["guest_sheet"]]
