@@ -268,13 +268,9 @@ async def _run_webhook_server(app, base):
         logger.exception("PTB 初始化或 webhook 設定失敗")
         # 不 raise：HTTP 伺服器仍可回應健康檢查，避免 Render 判整個服務掛掉
 
-    # --- OCR 引擎預熱（背景執行緒池，不阻塞） ---
-    async def _warmup_task():
-        try:
-            await asyncio.to_thread(ocr.warmup)
-        except Exception:
-            logger.exception("OCR 預熱失敗（不影響啟動，首次請求時會再載入）")
-    asyncio.create_task(_warmup_task())
+    # --- OCR 引擎預熱已移除 ---
+    # PaddleOCR 載入需要 200MB+ 記憶體，在 512MB Starter 方案上預熱會導致 OOM。
+    # 改為收到照片時才懶載入（第一次 OCR 會慢 10~30 秒，但有立即回覆告知使用者）。
 
     try:
         while True:
