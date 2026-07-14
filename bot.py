@@ -257,58 +257,13 @@ def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise SystemExit("請先設定環境變數 TELEGRAM_BOT_TOKEN")
+    app = _build_application(token)
     logger.info("Bot 啟動中 (polling)...")
-    _run_with_retry(token)
-
-
-import asyncio
-from telegram.error import Conflict
-
-
-def _run_with_retry(token, max_retries=50):
-    """啟動 polling；若遇到 409 衝突（有另一個實例同時 polling），
-    徹底關閉當前實例、等待較長時間，再以「全新 Application」重試。
-    較長的退避（30s）可讓 Render 部署時新舊實例的並存空窗結束，
-    避免兩個 polling 任務互卡成永久 409。"""
-    asyncio.run(_poll_loop(token, max_retries))
-
-
-async def _poll_loop(token, max_retries):
-    attempt = 0
-    while attempt < max_retries:
-        app = _build_application(token)  # 每次重試都用全新實例
-        try:
-            await app.initialize()
-            await app.start()
-            await app.updater.start_polling(drop_pending_updates=True)
-            logger.info("polling 已啟動，等待訊息…")
-            # 持續等待，直到 updater 因停止或衝突而結束
-            while app.updater.running:
-                await asyncio.sleep(1)
-            break  # 正常結束（收到停止信號）
-        except Conflict:
-            attempt += 1
-            logger.warning(
-                "偵測到 409 衝突（可能仍有其他 Bot 實例在 polling），"
-                "等待 30 秒後以全新實例重試 (%d/%d)…",
-                attempt, max_retries)
-            await _safe_shutdown(app)
-            await asyncio.sleep(30)
-        except Exception as e:
-            logger.exception("polling 發生未預期錯誤：%s", e)
-            await _safe_shutdown(app)
-            await asyncio.sleep(10)
-    else:
-        logger.error("已達重試上限，Bot 停止。請檢查是否有多個實例同時運行。")
-
-
-async def _safe_shutdown(app):
-    """盡量完整地關閉 Application，釋放 polling 任務，避免殘留。"""
-    for coro in (app.updater.stop(), app.stop(), app.shutdown()):
-        try:
-            await coro
-        except Exception:
-            pass
+    # 使用官方 run_polling：內建處理 SIGTERM/SIGINT，
+    # 部署時舊實例會乾淨退出，避免留下仍佔用 polling 的殭屍程序
+    # （這正是長期 409 Conflict「機器人沒反應」的主因）。
+    # 短暫的 409（新舊實例並存）會由 PTB 內部自動重試恢復。
+    app.run_polling(drop_pending_updates=True, close_loop=False)
 
 
 if __name__ == "__main__":
