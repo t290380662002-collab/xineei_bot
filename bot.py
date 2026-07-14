@@ -127,10 +127,6 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         raw_text = ocr.ocr_image_bytes(data)
-    except ocr.TesseractNotInstalled:
-        await update.effective_message.reply_text(
-            "【注意】證件 OCR 功能需要伺服器安裝 Tesseract，請聯絡管理員設定。")
-        return
     except Exception:
         logger.exception("OCR 失敗")
         await update.effective_message.reply_text(
@@ -229,7 +225,7 @@ async def _run_webhook_server(app, base):
     async def handle_health(request):
         status = {"status": "ok"}
         try:
-            status["ocr"] = "ready" if ocr.tesseract_ready() else "not_installed"
+            status["ocr"] = "ready" if ocr.paddleocr_ready() else "not_ready"
         except Exception as e:  # noqa
             status["ocr"] = f"error:{e}"
         return web.json_response(status)

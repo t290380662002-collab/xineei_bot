@@ -2,11 +2,14 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 安裝 Tesseract 與繁體/簡體中文語言包（證件 OCR 需要）
+# PaddlePaddle / OpenCV minimal runtime deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr \
-    tesseract-ocr-chi-tra \
-    tesseract-ocr-chi-sim \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libgomp1 \
+    libxrender1 \
+    libsm6 \
+    libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
