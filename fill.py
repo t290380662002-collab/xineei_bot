@@ -528,3 +528,48 @@ def verify_booking_names(booking: dict):
             warnings.append(prefix + msg)
     return (len(warnings) == 0, warnings)
 
+
+# ---------------------------------------------------------------------------
+# 年齡檢查：未滿 21 歲提示
+# ---------------------------------------------------------------------------
+def _compute_age(dob_str: str, checkin_str: str):
+    """計算從出生日到入住日的實足年齡；任一日期無法解析時回傳 None。"""
+    try:
+        dob = datetime.strptime(_norm_date(dob_str), "%Y/%m/%d")
+    except Exception:
+        return None
+    ci = _norm_date(checkin_str) if checkin_str else ""
+    if not ci:
+        return None
+    try:
+        ci_date = datetime.strptime(ci, "%Y/%m/%d")
+    except Exception:
+        return None
+    age = ci_date.year - dob.year
+    if (ci_date.month, ci_date.day) < (dob.month, dob.day):
+        age -= 1
+    return age
+
+
+def verify_guests_age(booking: dict):
+    """檢查入住者是否未滿 21 歲。
+    回傳 (all_ok, warnings)；warnings 為年齡不足的提示清單。
+    """
+    guests = booking.get("guests") or []
+    checkin = booking.get("入住", "")
+    warnings = []
+    for i, g in enumerate(guests, 1):
+        dob = g.get("dob", "")
+        if not dob:
+            continue
+        age = _compute_age(dob, checkin)
+        if age is not None and age < 21:
+            cn = g.get("cn_name", "") or g.get("en_name", "")
+            name = cn or f"第{i}位"
+            prefix = f"第{i}位入住者「{name}」：" if len(guests) > 1 else f"入住者「{name}」："
+            warnings.append(
+                f"⚠️ {prefix}年齡未滿 21 歲（入住日實足 {age} 歲），"
+                f"請確認是否符合飯店入住規定。"
+            )
+    return (len(warnings) == 0, warnings)
+
