@@ -68,6 +68,13 @@ def _nights(checkin, checkout):
         return ""
 
 
+def _text_width(s):
+    """估算字串顯示寬度：中文/全形字約 2 寬，英文/數字約 1 寬。"""
+    if s is None or s == "":
+        return 0
+    return sum(2 if ord(ch) > 127 else 1 for ch in str(s))
+
+
 def _fill_summary_sheet(wb, booking, guests, primary):
     if SUMMARY_SHEET in wb.sheetnames:
         ws = wb[SUMMARY_SHEET]
@@ -92,6 +99,12 @@ def _fill_summary_sheet(wb, booking, guests, primary):
     for c, v in enumerate(row, start=1):
         cell = ws.cell(row=2, column=c, value=v)
         cell.alignment = _SUMMARY_ALIGN
+
+    # 自動調整欄寬：依標題與資料中最寬者；中文約 2 寬、英文/數字約 1 寬，加 2 安全邊距。
+    for c, h in enumerate(SUMMARY_HEADERS, start=1):
+        col_letter = openpyxl.utils.get_column_letter(c)
+        need = max(_text_width(h), _text_width(row[c - 1])) + 2
+        ws.column_dimensions[col_letter].width = max(need, 8)
 
 
 def _norm_date(value):
