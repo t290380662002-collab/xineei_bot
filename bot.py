@@ -207,12 +207,6 @@ async def _run_webhook_server(app, base):
     await app.start()
     logger.info("webhook 已設定：%s", url)
 
-    # 預熱 OCR 引擎：在啟動時載入模型，避免第一次真實請求時才載入（耗 30~60 秒）
-    try:
-        ocr.warmup()
-    except Exception:
-        logger.exception("OCR 預熱失敗（不影響啟動，首次請求時會再載入）")
-
     async def handle_webhook(request):
         if WEBHOOK_SECRET and \
            request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
@@ -260,6 +254,15 @@ async def _run_webhook_server(app, base):
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     logger.info("HTTP 服務啟動於 0.0.0.0:%s (health=%s, webhook=%s)", port, "/", WEBHOOK_PATH)
+
+    # 預熱 OCR 引擎：在 HTTP 伺服器啟動「之後」才跑，放到執行緒池避免阻塞事件循環
+    # 這樣 Render 健康檢查能立即得到 200 回應，不會因模型載入耗時被判部署失敗
+    async def _warmup_task():
+        try:
+            await asyncio.to_thread(ocr.warmup)
+        except Exception:
+            logger.exception("OCR 預熱失敗（不影響啟動，首次請求時會再載入）")
+    asyncio.create_task(_warmup_task())
 
     try:
         while True:
