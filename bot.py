@@ -100,7 +100,9 @@ async def _download_photo_source(update):
     if src is None:
         return None, "not_image"
     try:
-        data = await src.get_file().download_as_bytearray()
+        # PTB 22.x：get_file() 與 download_as_bytearray() 都是 coroutine，須分兩次 await
+        file = await src.get_file()
+        data = await file.download_as_bytearray()
     except Exception:
         logger.exception("下載圖片失敗")
         return None, "download_fail"
