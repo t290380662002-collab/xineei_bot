@@ -51,6 +51,9 @@ class BookingTextFilter(filters.BaseFilter):
 
 async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """直接貼上訂房文字 → 解析 → 產生 Excel 回傳。"""
+    logger.info("text_entry: msg_id=%s text_len=%s",
+                update.message.message_id if update.message else None,
+                len(update.message.text or ""))
     booking = parse_booking_text(update.message.text)
     try:
         bio = fill_booking(booking)
@@ -72,12 +75,24 @@ async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _download_photo_source(update):
     """從 photo 或 image document 取圖片 bytes；不支援則回 (None, reason)。"""
     msg = update.effective_message
+    doc = msg.document if msg else None
+    mime = getattr(doc, "mime_type", None)
+    fname = getattr(doc, "file_name", None) or ""
+    ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+    logger.info("_download_photo_source: msg_id=%s has_photo=%s has_doc=%s mime=%s fname=%s ext=%s",
+                msg.message_id if msg else None,
+                bool(msg.photo) if msg else None,
+                bool(doc) if msg else None,
+                mime, fname, ext)
     src = None
     if msg.photo:
         src = msg.photo[-1]
-    elif getattr(msg.document, "mime_type", None) and \
-            msg.document.mime_type.startswith("image/"):
-        src = msg.document
+    elif doc is not None and (mime or ext):
+        # 任意 document：只要 mime 是 image/* 或副檔名是圖片，就當作圖片處理
+        if (mime and mime.startswith("image/")) or ext in {
+            "jpg", "jpeg", "png", "bmp", "gif", "tiff", "tif", "webp"
+        }:
+            src = doc
     if src is None:
         return None, "not_image"
     try:
@@ -92,6 +107,7 @@ async def _download_photo_source(update):
 
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """收到證件照片：OCR 識別，並與訂房文字核對（或僅回顯識別結果）。"""
+    logger.info("photo_handler triggered: msg_id=%s", update.effective_message.message_id if update.effective_message else None)
     data, err = await _download_photo_source(update)
     if err == "not_image":
         await update.effective_message.reply_text(
@@ -146,6 +162,12 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """任何未被 text/photo 處理的訊息，給一個指引，避免靜默無反應。"""
+    msg = update.effective_message
+    logger.info("fallback_handler: msg_id=%s content_type=%s has_photo=%s has_doc=%s",
+                msg.message_id if msg else None,
+                msg.chat.type if msg else None,
+                bool(msg.photo) if msg else None,
+                bool(msg.document) if msg else None)
     await update.effective_message.reply_text(
         "我看得懂兩種訊息：\n"
         "1. 直接貼上訂房文字（入住/退房/飯店/房型/件數…）\n"
@@ -157,7 +179,8 @@ def _build_application(token):
     不註冊任何指令，Telegram 不會顯示指令選單按鈕。"""
     app = Application.builder().token(token).build()
     text_filter = BookingTextFilter()
-    photo_filter = filters.PHOTO | filters.Document.IMAGE
+    # 照片/圖片：同時接受 photo 與任意 document（彈性處理各種傳送方式）
+    photo_filter = filters.PHOTO | filters.Document
     app.add_handler(MessageHandler(text_filter, text_entry))
     app.add_handler(MessageHandler(photo_filter, photo_handler))
     # 兜底：只有非文字、非照片/图片檔案时才提示，避免误触发
@@ -188,6 +211,20 @@ async def _run_webhook_server(app, base):
         except Exception:
             return web.Response(status=400, text="bad json")
         update = Update.de_json(data, app.bot)
+        msg_type = "unknown"
+        if update.message:
+            if update.message.photo:
+                msg_type = "photo"
+            elif update.message.document:
+                msg_type = f"document:{update.message.document.mime_type or 'unknown'}"
+            elif update.message.text:
+                msg_type = "text"
+            else:
+                msg_type = "other"
+        logger.info("handle_webhook: update_id=%s msg_id=%s type=%s",
+                    update.update_id,
+                    update.message.message_id if update.message else None,
+                    msg_type)
         try:
             await app.process_update(update)
         except Exception:
