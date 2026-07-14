@@ -91,16 +91,34 @@ def ocr_image_bytes(data: bytes) -> str:
         arr = cropped
 
     ocr = _get_engine()
-    result = ocr.ocr(arr, cls=True)
+    result = ocr.ocr(arr)
 
-    if not result or not result[0]:
+    if not result:
         return ""
 
     lines = []
-    for line in result[0]:
-        text = line[1][0]  # (text, confidence)
-        if text:
-            lines.append(text)
+    try:
+        # PaddleOCR 2.x 格式：[[bbox, (text, conf)], ...]
+        for item in result[0] if isinstance(result[0], list) else result:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                entry = item[1]
+                if isinstance(entry, (list, tuple)):
+                    text = entry[0]
+                else:
+                    text = str(entry)
+            elif hasattr(item, 'rec_text'):
+                text = getattr(item, 'rec_text', '')
+            elif isinstance(item, dict):
+                text = item.get('rec_text', item.get('text', ''))
+            else:
+                text = str(item)
+            if text:
+                lines.append(text)
+    except Exception:
+        logger.exception("OCR 結果解析失敗，原始類型: %s", type(result).__name__)
+        # 退路：嘗試直接轉文字
+        for item in result[0] if result and isinstance(result[0], list) else (result or []):
+            lines.append(str(item))
 
     return "\n".join(lines)
 
