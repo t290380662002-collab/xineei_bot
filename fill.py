@@ -85,7 +85,7 @@ def _fill_summary_sheet(wb, booking, guests, primary):
         cell = ws.cell(row=1, column=c, value=h)
         cell.alignment = _SUMMARY_ALIGN
 
-    sur, fir = split_en_name(primary.get("en_name", ""))
+    sur, fir = split_en_name(primary.get("en_name", ""), primary.get("cn_name", ""))
     en_full = ",".join(x for x in (sur, fir) if x)
     row = [
         booking.get("代理", ""),
@@ -124,15 +124,130 @@ def _norm_date(value):
     return s
 
 
-def split_en_name(en: str):
+# 常見中文姓氏 → 護照拼音（大寫）。多字姓放前面，優先匹配。
+_SURNAMES_PINYIN = {
+    # 複姓
+    "歐陽": "OUYANG", "欧阳": "OUYANG", "太史": "TAISHI", "上官": "SHANGGUAN",
+    "東方": "DONGFANG", "东方": "DONGFANG", "諸葛": "ZHUGE", "诸葛": "ZHUGE",
+    "司馬": "SIMA", "司马": "SIMA", "皇甫": "HUANGFU", "尉遲": "YUCHI",
+    "公孙": "GONGSUN", "公孫": "GONGSUN", "慕容": "MURONG", "司徒": "SITU",
+    "司空": "SIKONG", "令狐": "LINGHU", "軒轅": "XUANYUAN", "轩辕": "XUANYUAN",
+    "南宮": "NANGONG", "南宫": "NANGONG", "夏侯": "XIAHOU", "聞人": "WENREN",
+    "鲜于": "XIANYU", "鮮于": "XIANYU", "贺兰": "HELAN", "賀蘭": "HELAN",
+    "宇文": "YUWEN", "呼延": "HUYAN", "西門": "XIMEN", "西门": "XIMEN",
+    "東郭": "DONGGUO", "东郭": "DONGGUO", "南門": "NANMEN", "南门": "NANMEN",
+    "百里": "BAILI", "完顏": "WANYAN", "完颜": "WANYAN", "獨孤": "DUGU", "独孤": "DUGU",
+    # 單姓（依頻率與常用度排序，不完整但覆蓋絕大多數酒店訂單）
+    "趙": "ZHAO", "赵": "ZHAO", "錢": "QIAN", "钱": "QIAN", "孫": "SUN", "孙": "SUN",
+    "李": "LI", "周": "ZHOU", "吳": "WU", "吴": "WU", "鄭": "ZHENG", "郑": "ZHENG",
+    "王": "WANG", "馮": "FENG", "冯": "FENG", "陳": "CHEN", "陈": "CHEN", "褚": "CHU",
+    "衛": "WEI", "卫": "WEI", "蔣": "JIANG", "蒋": "JIANG", "沈": "SHEN", "韓": "HAN",
+    "韩": "HAN", "楊": "YANG", "杨": "YANG", "朱": "ZHU", "秦": "QIN", "尤": "YOU",
+    "許": "XU", "许": "XU", "何": "HE", "呂": "LYU", "吕": "LYU", "施": "SHI", "張": "ZHANG",
+    "张": "ZHANG", "孔": "KONG", "曹": "CAO", "嚴": "YAN", "严": "YAN", "華": "HUA",
+    "华": "HUA", "金": "JIN", "魏": "WEI", "陶": "TAO", "姜": "JIANG", "戚": "QI",
+    "謝": "XIE", "谢": "XIE", "鄒": "ZOU", "邹": "ZOU", "喻": "YU", "柏": "BAI",
+    "水": "SHUI", "竇": "DOU", "窦": "DOU", "章": "ZHANG", "雲": "YUN", "云": "YUN",
+    "蘇": "SU", "苏": "SU", "潘": "PAN", "葛": "GE", "奚": "XI", "范": "FAN",
+    "彭": "PENG", "郎": "LANG", "魯": "LU", "鲁": "LU", "韋": "WEI", "韦": "WEI",
+    "昌": "CHANG", "馬": "MA", "马": "MA", "苗": "MIAO", "鳳": "FENG", "凤": "FENG",
+    "花": "HUA", "方": "FANG", "俞": "YU", "任": "REN", "袁": "YUAN", "柳": "LIU",
+    "鮑": "BAO", "鲍": "BAO", "史": "SHI", "唐": "TANG", "費": "FEI", "费": "FEI",
+    "廉": "LIAN", "岑": "CEN", "薛": "XUE", "雷": "LEI", "賀": "HE", "贺": "HE",
+    "倪": "NI", "湯": "TANG", "汤": "TANG", "滕": "TENG", "殷": "YIN", "羅": "LUO",
+    "罗": "LUO", "畢": "BI", "毕": "BI", "郝": "HAO", "鄔": "WU", "邬": "WU",
+    "安": "AN", "常": "CHANG", "樂": "LE", "乐": "LE", "于": "YU", "時": "SHI",
+    "时": "SHI", "傅": "FU", "付": "FU", "皮": "PI", "卞": "BIAN", "齊": "QI",
+    "齐": "QI", "康": "KANG", "伍": "WU", "余": "YU", "元": "YUAN", "卜": "BU",
+    "顧": "GU", "顾": "GU", "孟": "MENG", "平": "PING", "黃": "HUANG", "黄": "HUANG",
+    "和": "HE", "穆": "MU", "蕭": "XIAO", "萧": "XIAO", "尹": "YIN", "姚": "YAO",
+    "邵": "SHAO", "湛": "ZHAN", "汪": "WANG", "祁": "QI", "毛": "MAO", "禹": "YU",
+    "狄": "DI", "米": "MI", "貝": "BEI", "贝": "BEI", "明": "MING", "臧": "ZANG",
+    "計": "JI", "计": "JI", "伏": "FU", "成": "CHENG", "戴": "DAI", "談": "TAN",
+    "谈": "TAN", "宋": "SONG", "茅": "MAO", "龐": "PANG", "庞": "PANG", "熊": "XIONG",
+    "紀": "JI", "纪": "JI", "舒": "SHU", "屈": "QU", "項": "XIANG", "项": "XIANG",
+    "祝": "ZHU", "董": "DONG", "梁": "LIANG", "杜": "DU", "阮": "RUAN", "藍": "LAN",
+    "蓝": "LAN", "閔": "MIN", "闵": "MIN", "席": "XI", "季": "JI", "麻": "MA",
+    "強": "QIANG", "强": "QIANG", "賈": "JIA", "贾": "JIA", "路": "LU", "婁": "LOU",
+    "娄": "LOU", "危": "WEI", "江": "JIANG", "童": "TONG", "顏": "YAN", "颜": "YAN",
+    "郭": "GUO", "梅": "MEI", "盛": "SHENG", "林": "LIN", "刁": "DIAO", "鍾": "ZHONG",
+    "钟": "ZHONG", "徐": "XU", "邱": "QIU", "駱": "LUO", "骆": "LUO", "高": "GAO",
+    "夏": "XIA", "蔡": "CAI", "田": "TIAN", "樊": "FAN", "胡": "HU", "凌": "LING",
+    "霍": "HUO", "虞": "YU", "萬": "WAN", "万": "WAN", "支": "ZHI", "柯": "KE",
+    "管": "GUAN", "盧": "LU", "卢": "LU", "莫": "MO", "房": "FANG", "裘": "QIU",
+    "繆": "MIAO", "缪": "MIAO", "干": "GAN", "應": "YING", "应": "YING", "宗": "ZONG",
+    "丁": "DING", "宣": "XUAN", "賁": "BEN", "贲": "BEN", "鄧": "DENG", "邓": "DENG",
+    "郁": "YU", "單": "SHAN", "单": "SHAN", "杭": "HANG", "洪": "HONG", "包": "BAO",
+    "石": "SHI", "崔": "CUI", "吉": "JI", "鈕": "NIU", "钮": "NIU", "龔": "GONG",
+    "龚": "GONG", "程": "CHENG", "嵇": "JI", "邢": "XING", "裴": "PEI", "陸": "LU",
+    "陆": "LU", "榮": "RONG", "荣": "RONG", "翁": "WENG", "荀": "XUN", "羊": "YANG",
+    "惠": "HUI", "甄": "ZHEN", "麴": "QU", "封": "FENG", "芮": "RUI", "羿": "YI",
+    "儲": "CHU", "储": "CHU", "靳": "JIN", "汲": "JI", "邴": "BING", "糜": "MI",
+    "松": "SONG", "井": "JING", "段": "DUAN", "富": "FU", "巫": "WU", "烏": "WU",
+    "乌": "WU", "焦": "JIAO", "巴": "BA", "弓": "GONG", "牧": "MU", "山": "SHAN",
+    "谷": "GU", "車": "CHE", "车": "CHE", "侯": "HOU", "蓬": "PENG", "全": "QUAN",
+    "郗": "XI", "班": "BAN", "仰": "YANG", "秋": "QIU", "仲": "ZHONG", "伊": "YI",
+    "宮": "GONG", "宫": "GONG", "寧": "NING", "宁": "NING", "仇": "QIU", "欒": "LUAN",
+    "栾": "LUAN", "暴": "BAO", "甘": "GAN", "鈄": "TOU", "钭": "TOU", "厲": "LI",
+    "厉": "LI", "戎": "RONG", "祖": "ZU", "武": "WU", "符": "FU", "劉": "LIU",
+    "刘": "LIU", "景": "JING", "詹": "ZHAN", "束": "SHU", "龍": "LONG", "龙": "LONG",
+    "葉": "YE", "叶": "YE", "司": "SI", "韶": "SHAO", "郜": "GAO", "黎": "LI",
+    "薊": "JI", "蓟": "JI", "薄": "BO", "印": "YIN", "宿": "SU", "白": "BAI",
+    "懷": "HUAI", "怀": "HUAI", "蒲": "PU", "邰": "TAI", "鄂": "E", "索": "SUO",
+    "咸": "XIAN", "籍": "JI", "賴": "LAI", "赖": "LAI", "卓": "ZHUO", "藺": "LIN",
+    "蔺": "LIN", "屠": "TU", "蒙": "MENG", "池": "CHI", "喬": "QIAO", "乔": "QIAO",
+    "陰": "YIN", "阴": "YIN", "鬱": "YU", "郁": "YU", "胥": "XU", "能": "NENG",
+    "蒼": "CANG", "苍": "CANG", "雙": "SHUANG", "双": "SHUANG", "聞": "WEN", "闻": "WEN",
+    "莘": "SHEN", "黨": "DANG", "党": "DANG", "翟": "ZHAI", "譚": "TAN", "谭": "TAN",
+    "貢": "GONG", "贡": "GONG", "勞": "LAO", "劳": "LAO", "逄": "PANG", "姬": "JI",
+    "申": "SHEN", "扶": "FU", "堵": "DU", "冉": "RAN", "宰": "ZAI", "酈": "LI",
+    "郦": "LI", "雍": "YONG", "郤": "XI", "璩": "QU", "桑": "SANG", "桂": "GUI",
+    "濮": "PU", "牛": "NIU", "壽": "SHOU", "寿": "SHOU", "通": "TONG", "邊": "BIAN",
+    "边": "BIAN", "扈": "HU", "燕": "YAN", "冀": "JI", "郟": "JIA", "郏": "JIA",
+    "浦": "PU", "尚": "SHANG", "農": "NONG", "农": "NONG", "溫": "WEN", "温": "WEN",
+    "別": "BIE", "别": "BIE", "莊": "ZHUANG", "庄": "ZHUANG", "晏": "YAN", "柴": "CHAI",
+    "瞿": "QU", "閻": "YAN", "阎": "YAN", "充": "CHONG", "慕": "MU", "連": "LIAN",
+    "连": "LIAN", "茹": "RU", "習": "XI", "习": "XI", "宦": "HUAN", "艾": "AI",
+    "魚": "YU", "鱼": "YU", "容": "RONG", "古": "GU", "易": "YI", "慎": "SHEN",
+    "戈": "GE", "廖": "LIAO", "庾": "YU", "終": "ZHONG", "终": "ZHONG", "暨": "JI",
+    "居": "JU", "衡": "HENG", "步": "BU", "都": "DU", "耿": "GENG", "滿": "MAN",
+    "满": "MAN", "弘": "HONG", "匡": "KUANG", "國": "GUO", "国": "GUO", "文": "WEN",
+    "寇": "KOU", "廣": "GUANG", "广": "GUANG", "祿": "LU", "禄": "LU", "闕": "QUE",
+    "阙": "QUE", "東": "DONG", "东": "DONG", "歐": "OU", "欧": "OU", "殳": "SHU",
+    "沃": "WO", "利": "LI", "越": "YUE", "隆": "LONG", "師": "SHI", "师": "SHI",
+    "鞏": "GONG", "巩": "GONG", "聶": "NIE", "聂": "NIE", "晁": "CHAO", "勾": "GOU",
+    "敖": "AO", "融": "RONG", "冷": "LENG", "訾": "ZI", "辛": "XIN", "闞": "KAN",
+    "阚": "KAN", "那": "NA", "簡": "JIAN", "简": "JIAN", "饒": "RAO", "饶": "RAO",
+    "空": "KONG", "曾": "ZENG", "毋": "WU", "沙": "SHA", "乜": "NIE", "養": "YANG",
+    "养": "YANG", "鞠": "JU", "須": "XU", "须": "XU", "豐": "FENG", "丰": "FENG",
+    "巢": "CHAO", "關": "GUAN", "关": "GUAN", "蒯": "KUAI", "相": "XIANG", "查": "ZHA",
+    "後": "HOU", "后": "HOU", "荊": "JING", "荆": "JING", "紅": "HONG", "红": "HONG",
+    "游": "YOU", "竺": "ZHU", "權": "QUAN", "权": "QUAN", "逯": "LU", "蓋": "GE",
+    "盖": "GE", "益": "YI", "桓": "HUAN", "公": "GONG", "牟": "MOU", "哈": "HA",
+    "言": "YAN", "福": "FU", "肖": "XIAO", "區": "OU", "区": "OU", "麥": "MAI",
+    "麦": "MAI", "佟": "TONG", "靖": "JING", "湛": "ZHAN", "謀": "MOU", "谋": "MOU",
+    "譚": "TAN", "谭": "TAN", "尋": "XUN", "寻": "XUN", "棘": "JI", "銀": "YIN",
+    "银": "YIN", "佴": "ER", "伯": "BO", "賞": "SHANG", "赏": "SHANG", "松": "SONG",
+    "段": "DUAN", "甄": "ZHEN", "尉": "WEI", "遲": "CHI", "迟": "CHI", "公": "GONG",
+    "孫": "SUN", "孙": "SUN", "公": "GONG", "冶": "YE", "淳": "CHUN", "於": "YU",
+    "乜": "NIE", "督": "DU", "仉": "ZHANG", "司": "SI", "邛": "QIONG", "僪": "YU",
+    "都": "DU", "粲": "CAN", "僧": "SENG", "薩": "SA", "萨": "SA", "隗": "KUI",
+    "穰": "RANG", "還": "HUAN", "邴": "BING", "雒": "LUO", "臧": "ZANG", "紅": "HONG",
+    "红": "HONG",
+}
+
+
+def split_en_name(en: str, cn_name: str = None):
     """把英文姓名拆成 (姓, 名)，並一律輸出大寫。
     不論輸入是半形逗號、全形逗號、斜線、點號或空白分隔，都會正確拆開。
+    若英文無分隔且提供中文姓名，會用中文姓的拼音自動切開（如 ZHANGYITING + 张依婷 -> ZHANG,YITING）。
     範例：'QU,SHENZHONG'   -> ('QU', 'SHENZHONG')
           'TANG/QINGPING'  -> ('TANG', 'QINGPING')
           'ZHOU.YINHUI'    -> ('ZHOU', 'YINHUI')
           'SHEN DAN'       -> ('SHEN', 'DAN')
           'QIU，JIELEI'    -> ('QIU', 'JIELEI')  （全形逗號）
           'qiu,jielei'     -> ('QIU', 'JIELEI')  （強制大寫）
+          'ZHANGYITING'    -> ('ZHANG', 'YITING')  （無分隔，按中文姓切）
     """
     en = (en or "").strip()
     if not en:
@@ -148,6 +263,15 @@ def split_en_name(en: str):
     toks = en.split()
     if len(toks) >= 2:
         return toks[0].upper(), " ".join(toks[1:]).upper()
+    # 無分隔：嘗試用中文姓的拼音切開
+    if cn_name:
+        cn = str(cn_name).strip()
+        # 先試複姓（2 字），再試單姓（1 字）
+        for n in (2, 1):
+            if len(cn) >= n:
+                py = _SURNAMES_PINYIN.get(cn[:n])
+                if py and en.upper().startswith(py):
+                    return py, en[len(py):].upper()
     return "", en.upper()
 
 
@@ -204,7 +328,7 @@ def fill_booking(booking: dict) -> BytesIO:
     guests = booking.get("guests", []) or []
     primary = guests[0] if guests else {}
 
-    sur, fir = split_en_name(primary.get("en_name", ""))
+    sur, fir = split_en_name(primary.get("en_name", ""), primary.get("cn_name", ""))
     mws[mc["surname"]] = sur
     mws[mc["firstname"]] = fir
     mws[mc["idno"]] = primary.get("idno", "")
