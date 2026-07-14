@@ -181,6 +181,21 @@ def _set_merged_cell(ws, coord, value):
     ws[coord] = value
 
 
+def _write_labeled(ws, coord, value):
+    """寫入數值；若該格原本就含標籤文字（如康萊德「人數 Pax(位):」、
+    「房數 No.of Rooms (間):」標籤與填空合一），保留標籤並接上數值；
+    其他飯店此格為空白填空格，直接寫入數值。"""
+    existing = ws[coord].value
+    if existing is not None and str(existing).strip():
+        txt = str(existing).strip()
+        if re.search(r"\d\s*$", txt):
+            ws[coord] = txt          # 已含數值就不重複加
+        else:
+            ws[coord] = f"{txt}{value}"
+    else:
+        ws[coord] = value
+
+
 def fill_booking(booking: dict) -> BytesIO:
     """
     booking 結構：
@@ -216,8 +231,11 @@ def fill_booking(booking: dict) -> BytesIO:
     mws[mc["dob"]] = _norm_date(primary.get("dob", ""))
     mws[mc["checkin"]] = _norm_date(booking.get("入住", ""))
     mws[mc["checkout"]] = _norm_date(booking.get("退房", ""))
-    mws[mc["rooms"]] = booking.get("件數", "")
-    mws[mc["pax"]] = len(guests)
+    # 房數 / 人數：若該格原本含標籤文字（如康萊德「人數 Pax(位):」、
+    # 「房數 No.of Rooms (間):」標籤與填空合一），保留標籤並接上數值；
+    # 其他飯店此格為空白填空格，直接寫入數值。
+    _write_labeled(mws, mc["rooms"], booking.get("件數", ""))
+    _write_labeled(mws, mc["pax"], len(guests))
 
     # 填表日期（右下角 Date: 後面的底線格；只填日期值，保留模板藍色字體格式）
     if "date" in mc:
@@ -250,37 +268,38 @@ def fill_booking(booking: dict) -> BytesIO:
     else:
         mws[mc["remark"]] = remark
 
-    # ---- 客人清單 ----
-    gws = wb[cfg["guest_sheet"]]
-    gc = cfg["guest_cols"]
-    first = cfg["guest_first_row"]
-    maxr = gws.max_row
+    # ---- 客人清單（部分飯店無獨立客人清單頁，例如康萊德，直接跳過）----
+    if cfg.get("guest_sheet") and cfg.get("guest_cols"):
+        gws = wb[cfg["guest_sheet"]]
+        gc = cfg["guest_cols"]
+        first = cfg["guest_first_row"]
+        maxr = gws.max_row
 
-    # 清空舊的範例資料
-    for r in range(first, maxr + 1):
-        for col in gc.values():
-            gws[f"{col}{r}"].value = None
+        # 清空舊的範例資料
+        for r in range(first, maxr + 1):
+            for col in gc.values():
+                gws[f"{col}{r}"].value = None
 
-    # 客人數超過現有列數 -> 往下加列
-    existing = maxr - first + 1
-    needed = max(len(guests), 1)
-    if needed > existing:
-        gws.insert_rows(maxr + 1, needed - existing)
+        # 客人數超過現有列數 -> 往下加列
+        existing = maxr - first + 1
+        needed = max(len(guests), 1)
+        if needed > existing:
+            gws.insert_rows(maxr + 1, needed - existing)
 
-    for i, g in enumerate(guests):
-        r = first + i
-        if "cn_name" in gc:
-            gws[f"{gc['cn_name']}{r}"] = g.get("cn_name", "")
-        if "en_name" in gc:
-            gws[f"{gc['en_name']}{r}"] = g.get("en_name", "")
-        if "dob" in gc:
-            gws[f"{gc['dob']}{r}"] = g.get("dob", "")
-        if "idno" in gc:
-            gws[f"{gc['idno']}{r}"] = g.get("idno", "")
-        if "roomtype" in gc:
-            gws[f"{gc['roomtype']}{r}"] = booking.get("房型", "")
-        if "smoking" in gc:
-            gws[f"{gc['smoking']}{r}"] = smoking
+        for i, g in enumerate(guests):
+            r = first + i
+            if "cn_name" in gc:
+                gws[f"{gc['cn_name']}{r}"] = g.get("cn_name", "")
+            if "en_name" in gc:
+                gws[f"{gc['en_name']}{r}"] = g.get("en_name", "")
+            if "dob" in gc:
+                gws[f"{gc['dob']}{r}"] = g.get("dob", "")
+            if "idno" in gc:
+                gws[f"{gc['idno']}{r}"] = g.get("idno", "")
+            if "roomtype" in gc:
+                gws[f"{gc['roomtype']}{r}"] = booking.get("房型", "")
+            if "smoking" in gc:
+                gws[f"{gc['smoking']}{r}"] = smoking
 
     bio = BytesIO()
     wb.save(bio)

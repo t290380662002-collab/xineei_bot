@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""測試：對四間飯店各產生一份填好的範例 Excel，存到 output/ 供肉眼確認。"""
+"""測試：對六間飯店各產生一份填好的範例 Excel，存到 output/ 供肉眼確認。"""
 import os
 from fill import fill_booking, output_filename
 
@@ -35,6 +35,13 @@ samples = {
         "房型": "DBK1", "件數": "1", "備注": "生日布置", "是否吸煙": "不吸煙",
         "guests": [
             {"cn_name": "BANG INHO", "en_name": "BANG,INHO", "dob": "1961/06/11", "idno": "M41646681"},
+        ],
+    },
+    "康萊德": {
+        "飯店": "康萊德", "入住": "2026/07/20", "退房": "2026/07/22",
+        "房型": "K1RV", "件數": "2", "備注": "高樓層、安靜房", "是否吸煙": "不吸煙",
+        "guests": [
+            {"cn_name": "孙碧春", "en_name": "SUN,BICHUN", "dob": "2000.05.25", "idno": "CK6005178"},
         ],
     },
 }
