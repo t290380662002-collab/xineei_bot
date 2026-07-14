@@ -69,7 +69,7 @@ _WRAPPABLE = {"房型", "飯店", "入住者中文", "入住者英文", "備注"
 
 # 訂房文字中常出現的「代理」代碼（也是過去會被從備注剔除的 SS/AT/WW/MM 等）。
 # 現在改為辨識成「代理」欄位，不再當作備注雜訊剔除。
-AGENT_CODES = {"AT", "SS", "私域", "WW", "MM", "ALEN"}
+AGENT_CODES = {"AT", "SS", "私域", "WW", "MM", "M", "ALEN"}
 
 # 備注黑名單（已無需剔除的代理代碼，此處留空；如需剔除其他雜訊再加回）。
 SKIP_TOKENS = set()
@@ -80,7 +80,7 @@ _SKIP_RE = re.compile(
 
 
 def _match_agent(seg):
-    """若整段文字就是一個代理代碼（AT/SS/私域/WW/MM/ALEN），回傳該代碼，否則 None。"""
+    """若整段文字就是一個代理代碼（AT/SS/私域/WW/MM/M/ALEN），回傳該代碼，否則 None。"""
     if not seg:
         return None
     s = re.sub(r"\s+", "", str(seg)).upper()
