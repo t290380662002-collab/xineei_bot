@@ -196,21 +196,22 @@ def _build_application(token):
 
 
 async def _run_webhook_server(app, base):
-    """自建 aiohttp 伺服器：同時處理 Telegram webhook 與健康檢查。"""
+    """自建 aiohttp 伺服器：同時處理 Telegram webhook 與健康檢查。
+    啟動順序：HTTP 伺服器 → PTB 初始化 → webhook 設定 → OCR 預熱。
+    確保健康檢查端點最先可用，避免 Render 判部署失敗。"""
     port = int(os.environ.get("PORT", 10000))
     url = base.rstrip("/") + WEBHOOK_PATH
 
-    # 設定 webhook（同一隻 Bot 只能有一組，因此不會有多實例互踢）
-    await app.bot.set_webhook(url=url, secret_token=WEBHOOK_SECRET,
-                              drop_pending_updates=True)
-    await app.initialize()
-    await app.start()
-    logger.info("webhook 已設定：%s", url)
+    # --- 先定義 handler，再啟動 HTTP 伺服器 ---
+    _ptb_ready = False  # 標記 PTB 是否已初始化完成
 
     async def handle_webhook(request):
         if WEBHOOK_SECRET and \
            request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
             return web.Response(status=403, text="forbidden")
+        if not _ptb_ready:
+            logger.warning("webhook 收到請求但 PTB 尚未就緒")
+            return web.Response(status=503, text="not ready")
         try:
             data = await request.json()
         except Exception:
@@ -237,7 +238,7 @@ async def _run_webhook_server(app, base):
         return web.Response(text="ok")
 
     async def handle_health(request):
-        status = {"status": "ok"}
+        status = {"status": "ok", "ptb": _ptb_ready}
         try:
             status["ocr"] = "ready" if ocr.paddleocr_ready() else "not_ready"
         except Exception as e:  # noqa
@@ -253,10 +254,21 @@ async def _run_webhook_server(app, base):
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logger.info("HTTP 服務啟動於 0.0.0.0:%s (health=%s, webhook=%s)", port, "/", WEBHOOK_PATH)
+    logger.info("HTTP 服務啟動於 0.0.0.0:%s (health=/, webhook=%s)", port, WEBHOOK_PATH)
 
-    # 預熱 OCR 引擎：在 HTTP 伺服器啟動「之後」才跑，放到執行緒池避免阻塞事件循環
-    # 這樣 Render 健康檢查能立即得到 200 回應，不會因模型載入耗時被判部署失敗
+    # --- HTTP 伺服器已啟動，現在初始化 PTB ---
+    try:
+        await app.initialize()
+        await app.start()
+        await app.bot.set_webhook(url=url, secret_token=WEBHOOK_SECRET,
+                                  drop_pending_updates=True)
+        _ptb_ready = True
+        logger.info("PTB 初始化完成，webhook 已設定：%s", url)
+    except Exception:
+        logger.exception("PTB 初始化或 webhook 設定失敗")
+        # 不 raise：HTTP 伺服器仍可回應健康檢查，避免 Render 判整個服務掛掉
+
+    # --- OCR 引擎預熱（背景執行緒池，不阻塞） ---
     async def _warmup_task():
         try:
             await asyncio.to_thread(ocr.warmup)
