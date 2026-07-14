@@ -57,9 +57,8 @@ async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_document(
             document=bio, filename=fn,
             caption="✅ 已從文字自動填入，訂房 Excel 請下載：")
-    except Exception as e:
+    except Exception:
         logger.exception("文字產檔失敗")
-        await update.message.reply_text(f"❌ 產檔失敗：{e}")
     context.user_data.clear()
     return
 
