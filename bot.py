@@ -44,21 +44,6 @@ class BookingTextFilter(filters.BaseFilter):
 async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """直接貼上訂房文字 → 解析 → 產生 Excel 回傳。"""
     booking = parse_booking_text(update.message.text)
-    missing = []
-    if not booking.get("飯店"):
-        missing.append("飯店")
-    if not booking.get("入住"):
-        missing.append("入住")
-    if not booking.get("退房"):
-        missing.append("退房")
-    if not booking.get("guests"):
-        missing.append("入住者資料(中文/英文/出生/證件)")
-    if missing:
-        await update.message.reply_text(
-            f"✅ 已讀取文字，但缺少必要欄位：{', '.join(missing)}\n"
-            f"請確認文字包含「飯店：/入住：/退房：/入住者中文：…」等欄位。",
-            reply_markup=ReplyKeyboardRemove())
-        return
     try:
         bio = fill_booking(booking)
         fn = output_filename(booking)
