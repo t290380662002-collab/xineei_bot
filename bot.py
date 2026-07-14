@@ -156,11 +156,14 @@ def _build_application(token):
     """建立 Application：僅保留「貼文字自動產檔」模式（模式 A）。
     不註冊任何指令，Telegram 不會顯示指令選單按鈕。"""
     app = Application.builder().token(token).build()
-    app.add_handler(MessageHandler(BookingTextFilter(), text_entry))
-    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
-    # 兜底：未被上述處理的訊息給提示，避免「完全沒反應」
+    text_filter = BookingTextFilter()
+    photo_filter = filters.PHOTO | filters.Document.IMAGE
+    app.add_handler(MessageHandler(text_filter, text_entry))
+    app.add_handler(MessageHandler(photo_filter, photo_handler))
+    # 兜底：只有非文字、非照片/图片檔案时才提示，避免误触发
     app.add_handler(MessageHandler(
-        filters.ChatType.PRIVATE & filters.ALL, fallback_handler), group=1)
+        filters.ChatType.PRIVATE & ~text_filter & ~photo_filter,
+        fallback_handler))
     return app
 
 
