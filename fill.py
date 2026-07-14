@@ -7,7 +7,7 @@ import re
 import openpyxl
 from io import BytesIO
 from datetime import datetime
-from config import HOTELS, TEMPLATES_DIR, resolve_hotel, BED_GROUPS
+from config import HOTELS, TEMPLATES_DIR, resolve_hotel
 
 # 簡體/繁體 與常見異體字正規化（讓使用者打的簡稱對到模板正式名）
 _CHAR_MAP = {
@@ -57,97 +57,6 @@ def _norm_date(value):
     if m:
         return f"{datetime.now().year:04d}/{int(m.group(1)):02d}/{int(m.group(2)):02d}"
     return s
-
-
-def _cell_by_code(hotel_cfg, code):
-    """依代碼找出對應方框儲存格。"""
-    c = _norm(code)
-    for cell, cd, cn in hotel_cfg["room_types"]:
-        if _norm(cd) == c or c in _norm(cd) or _norm(cd) in c:
-            return cell
-    return None
-
-
-def find_room_cells(hotel_cfg, room_input):
-    """根據代碼或中文名（含簡稱/異體字），找出要打勾的方框儲存格（可多格）。
-
-    多數情況回傳單一格；但若命中飯店專屬床型群組（BED_GROUPS，如威尼斯
-    大床→KC/KP/KD、雙床→TC/TP/TD），則回傳該群組所有存在的格子（全部打勾）。
-    回傳 list（可能空）。"""
-    if not room_input:
-        return []
-    room_input = re.sub(r"[（）()]", "", str(room_input))  # 去掉括號註記
-    inp = _norm(room_input)
-    # 第一輪：用代碼比對（最精準）
-    for cell, code, cn in hotel_cfg["room_types"]:
-        c = _norm(code)
-        if c == inp or c in inp or inp in c:
-            return [cell]
-    # 第二輪：飯店專屬床型群組（BED_GROUPS）——只要輸入含「大床/雙床」關鍵字，
-    # 就回傳該群組所有格子全部打勾（優先於中文名比對，避免「貝麗套房（雙床）」
-    # 被單一房型名攔成一格；簡繁輸入行為一致）。
-    hotel_key = None
-    for k, v in HOTELS.items():
-        if v is hotel_cfg:
-            hotel_key = k
-            break
-    if hotel_key and hotel_key in BED_GROUPS:
-        for bed, codes in BED_GROUPS[hotel_key].items():
-            if bed in inp:  # 使用者輸入含「大床」或「雙床」
-                cells = []
-                for code in codes:
-                    cell = _cell_by_code(hotel_cfg, code)
-                    if cell and cell not in cells:
-                        cells.append(cell)
-                if cells:
-                    return cells
-    # 第三輪：用中文名「核心字」比對（去泛詞 + 異體字正規化）
-    inpc = _core(room_input)
-    if inpc:
-        # 先找核心字「完全相等」者（最精準）。
-        # 可避免「梅費爾套房」被「豪華梅費爾套房」的 prefix 子串干擾而誤命中基礎房型；
-        # 也避免「天御别墅（四卧室）」因模板重複顯示名而一次勾到兩格（多筆時退回子串取第一筆）。
-        exact = [cell for cell, code, cn in hotel_cfg["room_types"] if cn and _core(cn) == inpc]
-        if len(exact) == 1:
-            return exact
-        for cell, code, cn in hotel_cfg["room_types"]:
-            if not cn:
-                continue
-            ccore = _core(cn)
-            if not ccore:
-                continue
-            if inpc in ccore or ccore in inpc:
-                return [cell]
-    # 第四輪：通用床型容錯（双床/雙人床/twin → 含雙床字樣房型；大床/king → 含大床字樣房型）
-    bed_rules = [
-        (("雙床", "雙人床", "twin", "二人"), ("雙床", "雙人床", "twin")),
-        (("大床", "king", "特大床"), ("大床", "king")),
-    ]
-    for keys, hits in bed_rules:
-        if any(k in inp for k in keys):
-            for cell, code, cn in hotel_cfg["room_types"]:
-                cn_n = _norm(cn or "")
-                if any(h in cn_n for h in hits):
-                    return [cell]
-    return []
-
-
-def find_room_cell(hotel_cfg, room_input):
-    """相容舊呼叫：回傳單一格（取第一個），無則 None。"""
-    cells = find_room_cells(hotel_cfg, room_input)
-    return cells[0] if cells else None
-
-
-def check_box(ws, cell_ref):
-    """把 '(   )' 方框打勾成 '(✓)'。"""
-    c = ws[cell_ref]
-    if c.value is None:
-        c.value = "(✓)"
-        return
-    txt = str(c.value)
-    if "(✓)" in txt or "(X)" in txt:
-        return
-    c.value = re.sub(r"\([\s]*\)", "(✓)", txt, count=1)
 
 
 def split_en_name(en: str):
@@ -248,17 +157,10 @@ def fill_booking(booking: dict) -> BytesIO:
         # 名匯有專屬「不吸煙」欄，其他家把吸煙資訊併入備注（只寫「不吸煙」/「吸煙」）
         remark = (remark + f"；{smoking}").strip("；")
 
-    # 房型方框打勾（支援 / 、、, 分隔的多房型同時打勾）
-    room_raw = booking.get("房型", "")
-    segs = [s.strip("（）() ") for s in re.split(r"[/、,，;；]", room_raw) if s.strip()]
-    matched = False
-    for seg in segs:
-        for cell in find_room_cells(cfg, seg):
-            check_box(mws, cell)
-            matched = True
-    if not matched and room_raw:
-        # 找不到對應房型，記到備注提醒
-        remark = (remark + f"；[房型未對應：{room_raw}]").strip("；")
+    # 房型：不再於模板打勾（避免變更勾選格），改以文字記錄在備注
+    room_raw = (booking.get("房型", "") or "").strip()
+    if room_raw:
+        remark = (remark + f"；房型：{room_raw}").strip("；")
 
     # 寫入備注：若該格原本就含欄位標籤（如「特別要求 Special request :」），
     # 保留標籤並把實際備注接在後面，避免覆蓋掉欄位名稱。
