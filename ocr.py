@@ -33,18 +33,58 @@ def tesseract_ready():
 # ---------------------------------------------------------------------------
 # 低階 OCR（本機 Tesseract，含 chi_tra/chi_sim/eng）
 # ---------------------------------------------------------------------------
+def _detect_and_crop_card(arr):
+    """自動偵測最大前景（卡片）區域並裁剪。回傳裁剪後的 numpy array 或 None。"""
+    import cv2
+    import numpy as np
+    H, W = arr.shape[:2]
+    gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+    # 大模糊 + Otsu 找前景（深色 = 卡片，淺色 = 木桌/牆壁）
+    blur = cv2.GaussianBlur(gray, (15, 15), 0)
+    _, mask = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    foreground = (mask == 0).astype(np.uint8) * 255
+    # 形態學閉運算連接斷裂
+    kernel = np.ones((15, 15), np.uint8)
+    closed = cv2.morphologyEx(foreground, cv2.MORPH_CLOSE, kernel)
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    x, y, w, h = cv2.boundingRect(contours[0])
+    # 過濾太小或太大
+    img_area = H * W
+    if w * h < img_area * 0.05 or w * h > img_area * 0.95:
+        return None
+    # 加 5% padding
+    pad = int(0.05 * max(w, h))
+    x1, y1 = max(0, x - pad), max(0, y - pad)
+    x2, y2 = min(W, x + w + pad), min(H, y + h + pad)
+    return arr[y1:y2, x1:x2]
+
+
+def _ocr_attempt(img, lang: str, psm: int = 6) -> str:
+    """對 PIL Image 跑一次 OCR，回傳文字。"""
+    import pytesseract
+    return pytesseract.image_to_string(
+        img, lang=lang,
+        config=f"--psm {psm} --oem 3",
+    )
+
+
 def ocr_image_bytes(data: bytes) -> str:
     """對圖片 bytes 做 OCR，回傳辨識文字（含換行）。
 
-    對證件照做以下預處理以提升辨識率：
-      1. 灰階
-      2. 自動放大：長邊 < 1500 時放大 2x；< 1000 再額外放大
-      3. 自適應閾值（adaptive threshold，區域性）—— 比 Otsu 對光照不均的真實照片更穩，
-         同時不會把「聊天截圖」整片洗白
-      4. Tesseract 用 PSM 6 + chi_tra+chi_sim+eng
+    預處理流程（依測試最佳）：
+      1. 自動偵測並裁剪卡片區域（用 Otsu 找最大前景）
+      2. 灰階
+      3. 2x 放大（小字才抓得到）
+      4. 不做二值化（adaptive threshold 對中文證件照會打散字形）
+      5. 跑多組 (lang, psm) 嘗試，合併結果
     """
     from io import BytesIO
     from PIL import Image, ImageOps
+    import numpy as np
     import pytesseract
 
     try:
@@ -53,49 +93,48 @@ def ocr_image_bytes(data: bytes) -> str:
         raise ValueError(f"圖片無法開啟：{e}")
 
     img = img.convert("RGB")
-    img = ImageOps.grayscale(img)
+    arr = np.array(img)
 
-    # 小圖放大：依長邊決定放大倍數（小字體證件要拉到 2000+ 才好辨識）
+    # 自動裁剪到卡片
+    cropped = _detect_and_crop_card(arr)
+    if cropped is not None and cropped.size > 0:
+        arr = cropped
+
+    # 灰階 + 2x 放大
+    img = Image.fromarray(arr).convert("L")
     w, h = img.size
-    if max(w, h) < 800:
-        scale = 3
-    elif max(w, h) < 1500:
-        scale = 2
-    else:
-        scale = 1
-    if scale > 1:
-        img = img.resize((w * scale, h * scale), Image.LANCZOS)
-        w, h = img.size
+    # 若裁剪後仍很大，不放大；否則 2x
+    if max(w, h) < 1500:
+        img = img.resize((w * 2, h * 2), Image.LANCZOS)
 
-    # 自適應閾值（局部），比 Otsu 全局閾值對真實照片更穩
-    try:
-        import numpy as np
-        import cv2
-        arr = np.array(img)
-        # adaptiveThreshold 要求單通道 8-bit
-        bw = cv2.adaptiveThreshold(
-            arr, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            31, 15,
-        )
-        img = Image.fromarray(bw)
-    except Exception:
-        # numpy/cv2 不可用的極端環境：跳過二值化，保留灰階
-        pass
+    # 多組嘗試，合併結果（單一語言包缺失時不中斷，容錯繼續下一組）
+    chunks = []
+    attempts = [
+        ("chi_tra+eng", 6),   # 繁中 + 英文，PSM 6 單一區塊
+        ("chi_tra+eng", 11),  # PSM 11 對稀疏文字（姓名行）有時更好
+        ("eng", 6),           # 純英文，抓 ID/MRZ
+    ]
+    last_err = None
+    for lang, psm in attempts:
+        try:
+            chunks.append(_ocr_attempt(img, lang, psm=psm))
+        except Exception as e:
+            # 單一 lang/psm 失敗不影響其他嘗試（可能是語言包缺失）
+            logger.debug("OCR attempt lang=%s psm=%s failed: %s", lang, psm, e)
+            last_err = e
+            continue
 
-    try:
-        # PSM 6 = 假設為單一均勻文字區塊（適合證件照）
-        text = pytesseract.image_to_string(
-            img, lang="chi_tra+chi_sim+eng",
-            config="--psm 6 --oem 3")
-    except Exception as e:
-        # pytesseract 在 binary 不存在時會拋 TesseractNotFoundError
-        if "Tesseract" in type(e).__name__ or "tesseract" in str(e).lower():
+    if not chunks:
+        # 全部嘗試都失敗
+        if last_err and ("Tesseract" in type(last_err).__name__
+                          or "tesseract" in str(last_err).lower()):
             raise TesseractNotInstalled(
                 "伺服器未安裝 Tesseract，無法辨識證件照片。")
-        raise
-    return text or ""
+        raise last_err if last_err else RuntimeError("OCR 全部嘗試失敗")
+
+    # 合併：用換行連接，extract_fields 內部 regex 會自行挑
+    text = "\n".join(chunks)
+    return text
 
 
 # ---------------------------------------------------------------------------
