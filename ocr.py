@@ -34,9 +34,17 @@ def tesseract_ready():
 # 低階 OCR（本機 Tesseract，含 chi_tra/chi_sim/eng）
 # ---------------------------------------------------------------------------
 def ocr_image_bytes(data: bytes) -> str:
-    """對圖片 bytes 做 OCR，回傳辨識文字（含換行）。"""
+    """對圖片 bytes 做 OCR，回傳辨識文字（含換行）。
+
+    對證件照做以下預處理以提升辨識率：
+      1. 灰階
+      2. 自動放大：長邊 < 1500 時放大 2x；< 1000 再額外放大
+      3. 自適應閾值（adaptive threshold，區域性）—— 比 Otsu 對光照不均的真實照片更穩，
+         同時不會把「聊天截圖」整片洗白
+      4. Tesseract 用 PSM 6 + chi_tra+chi_sim+eng
+    """
     from io import BytesIO
-    from PIL import Image
+    from PIL import Image, ImageOps
     import pytesseract
 
     try:
@@ -44,9 +52,43 @@ def ocr_image_bytes(data: bytes) -> str:
     except Exception as e:
         raise ValueError(f"圖片無法開啟：{e}")
 
-    img = img.convert("L")  # 灰階，提升印刷體辨識率
+    img = img.convert("RGB")
+    img = ImageOps.grayscale(img)
+
+    # 小圖放大：依長邊決定放大倍數（小字體證件要拉到 2000+ 才好辨識）
+    w, h = img.size
+    if max(w, h) < 800:
+        scale = 3
+    elif max(w, h) < 1500:
+        scale = 2
+    else:
+        scale = 1
+    if scale > 1:
+        img = img.resize((w * scale, h * scale), Image.LANCZOS)
+        w, h = img.size
+
+    # 自適應閾值（局部），比 Otsu 全局閾值對真實照片更穩
     try:
-        text = pytesseract.image_to_string(img, lang="chi_tra+chi_sim+eng")
+        import numpy as np
+        import cv2
+        arr = np.array(img)
+        # adaptiveThreshold 要求單通道 8-bit
+        bw = cv2.adaptiveThreshold(
+            arr, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            31, 15,
+        )
+        img = Image.fromarray(bw)
+    except Exception:
+        # numpy/cv2 不可用的極端環境：跳過二值化，保留灰階
+        pass
+
+    try:
+        # PSM 6 = 假設為單一均勻文字區塊（適合證件照）
+        text = pytesseract.image_to_string(
+            img, lang="chi_tra+chi_sim+eng",
+            config="--psm 6 --oem 3")
     except Exception as e:
         # pytesseract 在 binary 不存在時會拋 TesseractNotFoundError
         if "Tesseract" in type(e).__name__ or "tesseract" in str(e).lower():
