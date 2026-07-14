@@ -146,22 +146,12 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if booking_text and looks_like_booking(booking_text):
         booking = parse_booking_text(booking_text)
-        try:
-            bio = fill_booking(booking)
-            fn = output_filename(booking)
-            await update.message.reply_document(
-                document=bio, filename=fn,
-                caption="已從文字自動填入，訂房 Excel 請下載：")
-            ok, vwarns = verify_booking_names(booking)
-            if not ok:
-                await update.message.reply_text("\n".join(vwarns))
-        except Exception:
-            logger.exception("圖片訊息產檔失敗")
+        # 只比對證件 OCR 結果與填寫內容，不產 Excel
         warns = ocr.verify_ocr_vs_booking(fields, booking)
         if warns:
             await update.message.reply_text("\n".join(warns))
         else:
-            await update.message.reply_text("證件資料與填寫內容一致。")
+            await update.message.reply_text("✅ 證件資料與填寫內容一致。")
     else:
         await update.message.reply_text(ocr.format_fields(fields))
 
