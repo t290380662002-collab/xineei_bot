@@ -69,30 +69,54 @@ async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return
 
 
+async def _download_photo_source(update):
+    """從 photo 或 image document 取圖片 bytes；不支援則回 (None, reason)。"""
+    msg = update.effective_message
+    src = None
+    if msg.photo:
+        src = msg.photo[-1]
+    elif getattr(msg.document, "mime_type", None) and \
+            msg.document.mime_type.startswith("image/"):
+        src = msg.document
+    if src is None:
+        return None, "not_image"
+    try:
+        data = await src.get_file().download_as_bytearray()
+    except Exception:
+        logger.exception("下載圖片失敗")
+        return None, "download_fail"
+    if not data:
+        return None, "empty"
+    return bytes(data), None
+
+
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """收到證件照片：OCR 識別，並與訂房文字核對（或僅回顯識別結果）。"""
-    try:
-        photo = update.message.photo[-1]
-        file = await photo.get_file()
-        data = await file.download_as_bytearray()
-    except Exception:
-        logger.exception("下載照片失敗")
+    data, err = await _download_photo_source(update)
+    if err == "not_image":
+        await update.effective_message.reply_text(
+            "【注意】我看得懂「訂房文字」或直接傳送的「證件照片」。\n"
+            "請直接傳送照片（不要用「檔案」方式傳送）；若以檔案傳送，請確認是圖片格式。")
+        return
+    if err in ("download_fail", "empty"):
+        await update.effective_message.reply_text(
+            "【注意】證件照片下載失敗，請重試一次，或改為手動輸入。")
         return
 
     try:
-        raw_text = ocr.ocr_image_bytes(bytes(data))
+        raw_text = ocr.ocr_image_bytes(data)
     except ocr.TesseractNotInstalled:
-        await update.message.reply_text(
-            "⚠️ 證件 OCR 功能需要伺服器安裝 Tesseract，請聯絡管理員設定。")
+        await update.effective_message.reply_text(
+            "【注意】證件 OCR 功能需要伺服器安裝 Tesseract，請聯絡管理員設定。")
         return
     except Exception:
         logger.exception("OCR 失敗")
-        await update.message.reply_text(
-            "⚠️ 證件照片辨識失敗，請確認照片清晰或改為手動輸入。")
+        await update.effective_message.reply_text(
+            "【注意】證件照片辨識失敗，請確認照片清晰或改為手動輸入。")
         return
 
     fields = ocr.extract_fields(raw_text)
-    logger.info("OCR 識別欄位：%s", fields)
+    logger.info("OCR 識別欄位：%s | 原文長度 %d", fields, len(raw_text or ""))
 
     # 文字來源：圖片 caption 優先，否則用上一次貼的訂房文字
     caption = update.message.caption or ""
@@ -100,27 +124,32 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if booking_text and looks_like_booking(booking_text):
         booking = parse_booking_text(booking_text)
-        # 同時產檔（與純文字訊息行為一致）
         try:
             bio = fill_booking(booking)
             fn = output_filename(booking)
             await update.message.reply_document(
                 document=bio, filename=fn,
-                caption="✅ 已從文字自動填入，訂房 Excel 請下載：")
+                caption="已從文字自動填入，訂房 Excel 請下載：")
             ok, vwarns = verify_booking_names(booking)
             if not ok:
                 await update.message.reply_text("\n".join(vwarns))
         except Exception:
             logger.exception("圖片訊息產檔失敗")
-        # 證件 OCR 與填寫內容比對
         warns = ocr.verify_ocr_vs_booking(fields, booking)
         if warns:
             await update.message.reply_text("\n".join(warns))
         else:
-            await update.message.reply_text("✅ 證件資料與填寫內容一致。")
+            await update.message.reply_text("證件資料與填寫內容一致。")
     else:
-        # 只有照片：回顯識別結果供人工確認
         await update.message.reply_text(ocr.format_fields(fields))
+
+
+async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """任何未被 text/photo 處理的訊息，給一個指引，避免靜默無反應。"""
+    await update.effective_message.reply_text(
+        "我看得懂兩種訊息：\n"
+        "1. 直接貼上訂房文字（入住/退房/飯店/房型/件數…）\n"
+        "2. 傳送證件照片（請用「照片」方式，不要用「檔案」）")
 
 
 def _build_application(token):
@@ -129,6 +158,9 @@ def _build_application(token):
     app = Application.builder().token(token).build()
     app.add_handler(MessageHandler(BookingTextFilter(), text_entry))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    # 兜底：未被上述處理的訊息給提示，避免「完全沒反應」
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & filters.ALL, fallback_handler), group=1)
     return app
 
 
