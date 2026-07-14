@@ -2,9 +2,9 @@
 """
 證件照片 OCR 與欄位提取 / 比對。
 
-使用 PaddleOCR（百度開源，中文識別業界頂尖，95%+）。
-首次調用會自動下載模型（約 200MB），之後快取。
-限制：Docker 映像約 2GB+（含 PaddlePaddle CPU 版）。
+使用 RapidOCR（ONNX Runtime 版，輕量高效，記憶體約 80~120MB）。
+中文識別率佳，適合 512MB Render Starter 環境。
+首次調用會自動下載 ONNX 模型（約 30MB），之後快取。
 """
 import re
 import logging
@@ -12,42 +12,31 @@ import datetime
 
 logger = logging.getLogger(__name__)
 
-# PaddleOCR 引擎單例（懶加載）
+# RapidOCR 引擎單例（懶加載）
 _ENGINE = None
 
 
 def _get_engine():
-    """懶加載 PaddleOCR 引擎，回傳實例。"""
+    """懶加載 RapidOCR 引擎，回傳實例。"""
     global _ENGINE
     if _ENGINE is None:
-        from paddleocr import PaddleOCR
-        # PaddleOCR 3.x API：只傳 lang，默認自動角度校正
-        _ENGINE = PaddleOCR(lang='ch')
+        from rapidocr_onnxruntime import RapidOCR
+        _ENGINE = RapidOCR()
     return _ENGINE
 
 
-def paddleocr_ready():
-    """檢查 PaddleOCR 引擎是否可初始化（供健康檢查用）。"""
+def engine_ready():
+    """檢查 OCR 引擎是否可初始化（供健康檢查用）。"""
     try:
         _get_engine()
         return True
     except Exception as e:
-        logger.warning("PaddleOCR init failed: %s", e)
+        logger.warning("RapidOCR init failed: %s", e)
         return False
 
 
-def warmup():
-    """預熱引擎：建立實例 + 跑一張 dummy 圖，確保模型已載入。
-    在服務啟動時調用，避免第一次真實 OCR 請求時模型載入耗時 30~60 秒。"""
-    import numpy as np
-    logger.info("PaddleOCR 引擎預熱中…")
-    engine = _get_engine()
-    dummy = np.zeros((10, 10, 3), dtype=np.uint8)
-    try:
-        engine.ocr(dummy)
-    except Exception:
-        pass  # dummy 圖無文字，異常可忽略
-    logger.info("PaddleOCR 引擎預熱完成")
+# 保留舊名向後相容（bot.py /health 有引用）
+paddleocr_ready = engine_ready
 
 
 # ---------------------------------------------------------------------------
@@ -80,14 +69,10 @@ def _detect_and_crop_card(arr):
 
 
 # ---------------------------------------------------------------------------
-# OCR（PaddleOCR）
+# OCR（RapidOCR）
 # ---------------------------------------------------------------------------
 def ocr_image_bytes(data: bytes) -> str:
-    """對圖片 bytes 做 OCR（PaddleOCR），回傳辨識文字（每行用換行分開）。
-
-    PaddleOCR 內建強大預處理（角度校正、文檔增強等），不需要像 Tesseract
-    那樣做灰階/二值化/放大。
-    """
+    """對圖片 bytes 做 OCR（RapidOCR），回傳辨識文字（每行用換行分開）。"""
     from io import BytesIO
     from PIL import Image
     import numpy as np
@@ -104,35 +89,19 @@ def ocr_image_bytes(data: bytes) -> str:
     if cropped is not None and cropped.size > 0:
         arr = cropped
 
-    ocr = _get_engine()
-    result = ocr.ocr(arr)
+    engine = _get_engine()
+    result, _ = engine(arr)  # RapidOCR 回 (list, elapse)
 
     if not result:
         return ""
 
     lines = []
-    try:
-        # PaddleOCR 2.x 格式：[[bbox, (text, conf)], ...]
-        for item in result[0] if isinstance(result[0], list) else result:
-            if isinstance(item, (list, tuple)) and len(item) >= 2:
-                entry = item[1]
-                if isinstance(entry, (list, tuple)):
-                    text = entry[0]
-                else:
-                    text = str(entry)
-            elif hasattr(item, 'rec_text'):
-                text = getattr(item, 'rec_text', '')
-            elif isinstance(item, dict):
-                text = item.get('rec_text', item.get('text', ''))
-            else:
-                text = str(item)
+    for item in result:
+        # RapidOCR 格式：[bbox, text, confidence]
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            text = str(item[1]).strip()
             if text:
                 lines.append(text)
-    except Exception:
-        logger.exception("OCR 結果解析失敗，原始類型: %s", type(result).__name__)
-        # 退路：嘗試直接轉文字
-        for item in result[0] if result and isinstance(result[0], list) else (result or []):
-            lines.append(str(item))
 
     return "\n".join(lines)
 
