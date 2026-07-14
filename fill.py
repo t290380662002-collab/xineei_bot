@@ -5,6 +5,7 @@
 """
 import re
 import openpyxl
+from openpyxl.styles import Alignment
 from io import BytesIO
 from datetime import datetime, timezone, timedelta
 from config import HOTELS, TEMPLATES_DIR, resolve_hotel
@@ -53,6 +54,7 @@ def _core(s):
 # ---------------------------------------------------------------------------
 SUMMARY_SHEET = "訂單摘要"
 SUMMARY_HEADERS = ["代理", "訂單編號", "英文姓名", "中文姓名", "入住日期", "退房日期", "晚數"]
+_SUMMARY_ALIGN = Alignment(horizontal="center", vertical="center")
 
 
 def _nights(checkin, checkout):
@@ -73,10 +75,11 @@ def _fill_summary_sheet(wb, booking, guests, primary):
         ws = wb.create_sheet(SUMMARY_SHEET)
 
     for c, h in enumerate(SUMMARY_HEADERS, start=1):
-        ws.cell(row=1, column=c, value=h)
+        cell = ws.cell(row=1, column=c, value=h)
+        cell.alignment = _SUMMARY_ALIGN
 
     sur, fir = split_en_name(primary.get("en_name", ""))
-    en_full = " ".join(x for x in (sur, fir) if x).strip()
+    en_full = ",".join(x for x in (sur, fir) if x)
     row = [
         booking.get("代理", ""),
         booking.get("訂單編號", ""),
@@ -87,7 +90,8 @@ def _fill_summary_sheet(wb, booking, guests, primary):
         _nights(booking.get("入住", ""), booking.get("退房", "")),
     ]
     for c, v in enumerate(row, start=1):
-        ws.cell(row=2, column=c, value=v)
+        cell = ws.cell(row=2, column=c, value=v)
+        cell.alignment = _SUMMARY_ALIGN
 
 
 def _norm_date(value):
