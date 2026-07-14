@@ -192,7 +192,12 @@ async def _run_webhook_server(app, base):
         return web.Response(text="ok")
 
     async def handle_health(request):
-        return web.Response(text="ok", status=200)
+        status = {"status": "ok"}
+        try:
+            status["ocr"] = "ready" if ocr.tesseract_ready() else "not_installed"
+        except Exception as e:  # noqa
+            status["ocr"] = f"error:{e}"
+        return web.json_response(status)
 
     aio_app = web.Application()
     aio_app.router.add_post(WEBHOOK_PATH, handle_webhook)

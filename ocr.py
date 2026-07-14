@@ -20,6 +20,16 @@ class TesseractNotInstalled(Exception):
     """Tesseract 未安裝或不在 PATH 時拋出。"""
 
 
+def tesseract_ready():
+    """檢查本機 Tesseract 是否可用（供健康檢查用）。"""
+    try:
+        import pytesseract
+        pytesseract.get_tesseract_version()
+        return True
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # 低階 OCR（本機 Tesseract，含 chi_tra/chi_sim/eng）
 # ---------------------------------------------------------------------------
