@@ -40,11 +40,17 @@ def _webhook_base_url():
 
 
 class BookingTextFilter(filters.BaseFilter):
-    """判斷訊息是否為「訂房文字格式」（含至少 4 個可辨識欄位）。"""
+    """判斷訊息是否為「訂房文字格式」（含至少 4 個可辨識欄位）。
+    顯式排除照片/文件，避免 photo/document 訊息被誤判為文字。"""
 
     def filter(self, update):
         msg = update.effective_message
-        if not msg or not msg.text:
+        if not msg:
+            return False
+        # 只要帶有 photo 或 document，就不是文字訂單
+        if msg.photo or msg.document:
+            return False
+        if not msg.text:
             return False
         return looks_like_booking(msg.text)
 
@@ -177,12 +183,10 @@ def _build_application(token):
     不註冊任何指令，Telegram 不會顯示指令選單按鈕。"""
     app = Application.builder().token(token).build()
     text_filter = BookingTextFilter()
-    # 照片/圖片：同時接受 photo 與任意 document（彈性處理各種傳送方式）
-    # 注意：filters.Document 是類別本身，不能直接 |，須用實例 Document.ALL
     photo_filter = filters.PHOTO | filters.Document.ALL
-    app.add_handler(MessageHandler(text_filter, text_entry))
+    # 關鍵：photo_handler 必須排在 text_entry 前面，確保照片/文件優先處理
     app.add_handler(MessageHandler(photo_filter, photo_handler))
-    # 兜底：只有非文字、非照片/图片檔案时才提示，避免误触发
+    app.add_handler(MessageHandler(text_filter, text_entry))
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & ~text_filter & ~photo_filter,
         fallback_handler))
