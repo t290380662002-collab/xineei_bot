@@ -37,7 +37,8 @@ def paddleocr_ready():
     try:
         _get_engine()
         return True
-    except Exception:
+    except Exception as e:
+        logger.warning("PaddleOCR init failed: %s", e)
         return False
 
 
