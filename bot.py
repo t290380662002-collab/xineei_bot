@@ -5,17 +5,20 @@
   貼上訂房文字格式（入住：/退房：/飯店：/房型：/件數：/備注：/是否吸煙：/入住者中文：…）
   -> 自動解析 -> 產生 Excel 回傳
 每筆都產生獨立的新 Excel 檔，直接回傳給使用者下載。
-（模式 B：/start 逐步對話 已移除，僅保留模式 A。）
 
-運作模式（自動判斷）：
+運作模式：
   - 若環境有 WEBHOOK_URL 或 RENDER_EXTERNAL_URL（Render Web Service 自動注入），
-    則使用 Webhook 模式：Telegram 主動把訊息推播到本服務網址，
+    則啟用 Webhook 模式：自建 aiohttp 伺服器同時提供
+      · POST /webhook  -> 接收 Telegram 推播
+      · GET  /         -> 健康檢查（回 200），讓 Render 部署不被判失敗
     「同一隻 Bot 只能有一組 webhook」，因此從根本杜絕 polling 的 409 多實例互踢。
   - 否則退回 Polling 模式（本機開發用）。
 """
 import os
+import asyncio
 import logging
-from telegram import Update, ReplyKeyboardRemove
+from aiohttp import web
+from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, ContextTypes,
     filters,
@@ -33,25 +36,6 @@ WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "xinwea-booking-2026")
 def _webhook_base_url():
     """回傳 webhook 基底網址（不含路徑）；無則回 None。"""
     return os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL") or None
-
-
-async def _set_webhook(app):
-    base = _webhook_base_url()
-    if not base:
-        logger.error("未偵測到 WEBHOOK_URL / RENDER_EXTERNAL_URL，無法設定 webhook")
-        return
-    url = base.rstrip("/") + WEBHOOK_PATH
-    await app.bot.set_webhook(url=url, secret_token=WEBHOOK_SECRET,
-                              drop_pending_updates=True)
-    logger.info("webhook 已設定：%s", url)
-
-
-async def _clear_webhook(app):
-    try:
-        await app.bot.delete_webhook(drop_pending_updates=True)
-        logger.info("已清除 webhook / 舊 polling 實例")
-    except Exception as e:
-        logger.warning("清除時發生錯誤（可忽略）：%s", e)
 
 
 class BookingTextFilter(filters.BaseFilter):
@@ -94,6 +78,60 @@ def _build_application(token):
     return app
 
 
+async def _run_webhook_server(app, base):
+    """自建 aiohttp 伺服器：同時處理 Telegram webhook 與健康檢查。"""
+    port = int(os.environ.get("PORT", 10000))
+    url = base.rstrip("/") + WEBHOOK_PATH
+
+    # 設定 webhook（同一隻 Bot 只能有一組，因此不會有多實例互踢）
+    await app.bot.set_webhook(url=url, secret_token=WEBHOOK_SECRET,
+                              drop_pending_updates=True)
+    await app.initialize()
+    await app.start()
+    logger.info("webhook 已設定：%s", url)
+
+    async def handle_webhook(request):
+        if WEBHOOK_SECRET and \
+           request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
+            return web.Response(status=403, text="forbidden")
+        try:
+            data = await request.json()
+        except Exception:
+            return web.Response(status=400, text="bad json")
+        update = Update.de_json(data, app.bot)
+        try:
+            await app.process_update(update)
+        except Exception:
+            logger.exception("process_update 失敗")
+        return web.Response(text="ok")
+
+    async def handle_health(request):
+        return web.Response(text="ok", status=200)
+
+    aio_app = web.Application()
+    aio_app.router.add_post(WEBHOOK_PATH, handle_webhook)
+    aio_app.router.add_get("/", handle_health)
+    aio_app.router.add_get("/health", handle_health)
+
+    runner = web.AppRunner(aio_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info("HTTP 服務啟動於 0.0.0.0:%s (health=%s, webhook=%s)", port, "/", WEBHOOK_PATH)
+
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    finally:
+        try:
+            await app.bot.delete_webhook()
+        except Exception:
+            pass
+        await app.stop()
+        await app.shutdown()
+        await runner.cleanup()
+
+
 def main():
     # 本機開發時從 .env 讀取 token；正式部署請用環境變數設定
     try:
@@ -114,31 +152,15 @@ def main():
 
     if base:
         # ---- Webhook 模式（Render Web Service）----
-        app.post_init = _set_webhook
-        app.post_stop = _clear_webhook
-        port = int(os.environ.get("PORT", 10000))
-        logger.info("Bot 啟動中 (webhook) -> %s%s | PORT=%s", base.rstrip("/"), WEBHOOK_PATH, port)
-        # Render 會對 healthCheckPath 做 HTTP 探活，需回 200；否則部署會被判失敗
-        from aiohttp import web
-        health_app = web.Application()
-        async def _health(_req):
-            return web.Response(text="ok", status=200)
-        health_app.router.add_get("/", _health)
+        logger.info("Bot 啟動中 (webhook) -> %s%s | PORT=%s",
+                    base.rstrip("/"), WEBHOOK_PATH, os.environ.get("PORT"))
         try:
-            app.run_webhook(
-                listen="0.0.0.0",
-                port=port,
-                url_path=WEBHOOK_PATH,
-                secret_token=WEBHOOK_SECRET,
-                web_app=health_app,
-                drop_pending_updates=True,
-            )
+            asyncio.run(_run_webhook_server(app, base))
         except Exception as e:
-            logger.exception("run_webhook 啟動失敗：%s", e)
+            logger.exception("webhook 服務啟動失敗：%s", e)
             raise
     else:
         # ---- Polling 模式（本機開發備援）----
-        app.post_init = _clear_webhook
         logger.info("Bot 啟動中 (polling)...")
         app.run_polling(drop_pending_updates=True, close_loop=False)
 
