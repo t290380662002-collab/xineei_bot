@@ -20,7 +20,7 @@ import logging
 from aiohttp import web
 from telegram import Update
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, ContextTypes,
+    Application, MessageHandler, ContextTypes,
     filters,
 )
 from fill import fill_booking, output_filename
@@ -64,15 +64,9 @@ async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _build_application(token):
-    """建立 Application：僅保留「貼文字自動產檔」模式（模式 A）。"""
+    """建立 Application：僅保留「貼文字自動產檔」模式（模式 A）。
+    不註冊任何指令，Telegram 不會顯示指令選單按鈕。"""
     app = Application.builder().token(token).build()
-
-    async def start_hint(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text(
-            "請直接貼上訂房文字（含 飯店 / 入住 / 退房 / 房型 / 件數 / 入住者…），"
-            "我會自動填入並產生 Excel 回傳。")
-
-    app.add_handler(CommandHandler("start", start_hint))
     app.add_handler(MessageHandler(BookingTextFilter(), text_entry))
     return app
 
