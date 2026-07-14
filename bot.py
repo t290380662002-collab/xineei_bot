@@ -6,6 +6,12 @@
   -> 自動解析 -> 產生 Excel 回傳
 每筆都產生獨立的新 Excel 檔，直接回傳給使用者下載。
 （模式 B：/start 逐步對話 已移除，僅保留模式 A。）
+
+運作模式（自動判斷）：
+  - 若環境有 WEBHOOK_URL 或 RENDER_EXTERNAL_URL（Render Web Service 自動注入），
+    則使用 Webhook 模式：Telegram 主動把訊息推播到本服務網址，
+    「同一隻 Bot 只能有一組 webhook」，因此從根本杜絕 polling 的 409 多實例互踢。
+  - 否則退回 Polling 模式（本機開發用）。
 """
 import os
 import logging
@@ -20,15 +26,32 @@ from parse_text import parse_booking_text, looks_like_booking
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "xinwea-booking-2026")
 
-async def _clear_stale(app):
-    """啟動時先清掉任何殘留的 webhook / 舊 polling 實例，避免 Render 重啟時
-    新舊兩隻同時 polling 造成的 409 Conflict（terminated by other getUpdates）。"""
+
+def _webhook_base_url():
+    """回傳 webhook 基底網址（不含路徑）；無則回 None。"""
+    return os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL") or None
+
+
+async def _set_webhook(app):
+    base = _webhook_base_url()
+    if not base:
+        logger.error("未偵測到 WEBHOOK_URL / RENDER_EXTERNAL_URL，無法設定 webhook")
+        return
+    url = base.rstrip("/") + WEBHOOK_PATH
+    await app.bot.set_webhook(url=url, secret_token=WEBHOOK_SECRET,
+                              drop_pending_updates=True)
+    logger.info("webhook 已設定：%s", url)
+
+
+async def _clear_webhook(app):
     try:
         await app.bot.delete_webhook(drop_pending_updates=True)
-        logger.info("已清除可能的殘留 webhook / 舊 polling 實例")
+        logger.info("已清除 webhook / 舊 polling 實例")
     except Exception as e:
-        logger.warning("清除殘留實例時發生錯誤（可忽略）：%s", e)
+        logger.warning("清除時發生錯誤（可忽略）：%s", e)
 
 
 class BookingTextFilter(filters.BaseFilter):
@@ -58,9 +81,8 @@ async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _build_application(token):
-    """建立 Application：僅保留「貼文字自動產檔」模式（模式 A）。
-    模式 B（/start 逐步對話）已移除；/start 僅提示直接貼文字。"""
-    app = Application.builder().token(token).post_init(_clear_stale).build()
+    """建立 Application：僅保留「貼文字自動產檔」模式（模式 A）。"""
+    app = Application.builder().token(token).build()
 
     async def start_hint(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
@@ -82,13 +104,28 @@ def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise SystemExit("請先設定環境變數 TELEGRAM_BOT_TOKEN")
+
     app = _build_application(token)
-    logger.info("Bot 啟動中 (polling)...")
-    # 使用官方 run_polling：內建處理 SIGTERM/SIGINT，
-    # 部署時舊實例會乾淨退出，避免留下仍佔用 polling 的殭屍程序
-    # （這正是長期 409 Conflict「機器人沒反應」的主因）。
-    # 短暫的 409（新舊實例並存）會由 PTB 內部自動重試恢復。
-    app.run_polling(drop_pending_updates=True, close_loop=False)
+    base = _webhook_base_url()
+
+    if base:
+        # ---- Webhook 模式（Render Web Service）----
+        app.post_init = _set_webhook
+        app.post_stop = _clear_webhook
+        port = int(os.environ.get("PORT", 10000))
+        logger.info("Bot 啟動中 (webhook) -> %s%s", base.rstrip("/"), WEBHOOK_PATH)
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=WEBHOOK_PATH,
+            secret_token=WEBHOOK_SECRET,
+            drop_pending_updates=True,
+        )
+    else:
+        # ---- Polling 模式（本機開發備援）----
+        app.post_init = _clear_webhook
+        logger.info("Bot 啟動中 (polling)...")
+        app.run_polling(drop_pending_updates=True, close_loop=False)
 
 
 if __name__ == "__main__":
