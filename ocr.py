@@ -2,9 +2,10 @@
 """
 證件照片 OCR 與欄位提取 / 比對。
 
-使用 rapidocr_onnxruntime（純 pip 安裝，自帶中英文 ONNX 模型，無需系統安裝 Tesseract）。
+使用本地 Tesseract（證件照片不出伺服器，隱私最佳）。
 限制：
-  - 首次執行會自動下載 ONNX 模型（需網路，約數十 MB，之後快取）。
+  - Tesseract 必須已安裝（含 chi_tra / chi_sim 中文包），否則 ocr_image_bytes
+    會拋出 TesseractNotInstalled。Docker 部署已內建安裝。
   - OCR 準確率取決於拍照清晰度，約 85–95%；下方比對邏輯已做容錯（去空白、
     日期歸一化、拼音核對），但仍建議人工確認。
 """
@@ -15,31 +16,34 @@ import datetime
 logger = logging.getLogger(__name__)
 
 
+class TesseractNotInstalled(Exception):
+    """Tesseract 未安裝或不在 PATH 時拋出。"""
+
+
 # ---------------------------------------------------------------------------
-# 低階 OCR（rapidocr_onnxruntime，純 pip，含中英文模型）
+# 低階 OCR（本機 Tesseract，含 chi_tra/chi_sim/eng）
 # ---------------------------------------------------------------------------
-_ENGINE = None
-
-
-def _get_engine():
-    """懶加載並快取 RapidOCR 引擎（首次會下載模型）。"""
-    global _ENGINE
-    if _ENGINE is None:
-        from rapidocr_onnxruntime import RapidOCR
-        _ENGINE = RapidOCR()
-    return _ENGINE
-
-
 def ocr_image_bytes(data: bytes) -> str:
-    """對圖片 bytes 做 OCR，回傳辨識文字（每行一筆）。"""
-    engine = _get_engine()
+    """對圖片 bytes 做 OCR，回傳辨識文字（含換行）。"""
+    from io import BytesIO
+    from PIL import Image
+    import pytesseract
+
     try:
-        result, _ = engine(data)
+        img = Image.open(BytesIO(data))
     except Exception as e:
-        raise RuntimeError(f"證件照片辨識失敗：{e}")
-    # result: list of [box, text, score] 或 None
-    lines = [item[1] for item in (result or [])]
-    return "\n".join(lines)
+        raise ValueError(f"圖片無法開啟：{e}")
+
+    img = img.convert("L")  # 灰階，提升印刷體辨識率
+    try:
+        text = pytesseract.image_to_string(img, lang="chi_tra+chi_sim+eng")
+    except Exception as e:
+        # pytesseract 在 binary 不存在時會拋 TesseractNotFoundError
+        if "Tesseract" in type(e).__name__ or "tesseract" in str(e).lower():
+            raise TesseractNotInstalled(
+                "伺服器未安裝 Tesseract，無法辨識證件照片。")
+        raise
+    return text or ""
 
 
 # ---------------------------------------------------------------------------
