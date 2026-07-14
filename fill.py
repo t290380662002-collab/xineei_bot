@@ -412,51 +412,106 @@ def output_filename(booking: dict) -> str:
 # ---------------------------------------------------------------------------
 # 中文 / 英文姓名拼音自動核對
 # ---------------------------------------------------------------------------
+_NAME_TITLES = {
+    "MR", "MRS", "MS", "MISS", "DR", "MASTER", "MSTR", "MDM", "MADAM",
+    "SIR", "PROF",
+}
+
+
 def _cn_to_pinyin(cn: str) -> str:
-    """把中文姓名轉成無聲調、無空白的大寫拼音（如 张依婷 -> ZHANGYITING）。"""
+    """把中文姓名轉成無聲調、無空白的大寫拼音（如 张依婷 -> ZHANGYITING）。
+    姓氏優先用 _SURNAMES_PINYIN 表（處理多音姓），其餘用 pypinyin。"""
     from pypinyin import lazy_pinyin
-    return "".join(lazy_pinyin(str(cn))).upper()
+    cn = str(cn or "").strip()
+    for n in (2, 1):
+        if len(cn) >= n and cn[:n] in _SURNAMES_PINYIN:
+            sur = _SURNAMES_PINYIN[cn[:n]]
+            rest = "".join(lazy_pinyin(cn[n:])).upper()
+            return (sur + rest)
+    return "".join(lazy_pinyin(cn)).upper()
 
 
-def _is_subsequence(a: str, b: str) -> bool:
-    """a 是否為 b 的子序列（字元順序一致、可跳過 b 中部分字元）。"""
-    it = iter(b)
-    return all(ch in it for ch in a)
+def _cn_pinyin_acceptable(cn: str):
+    """回傳中文姓名可接受的英文全拼集合（大寫、無分隔）。
+    涵蓋：姓+名、名+姓、只給姓；並用多音字所有讀音組合擴充，降低誤報。
+    無法轉拼音時回傳 None。
+    """
+    from pypinyin import pinyin, Style
+    cn = str(cn or "").strip()
+    if not cn:
+        return None
+    # 決定姓（複姓優先），姓拼音優先取權威表
+    sur_len, sur_set = 0, None
+    for n in (2, 1):
+        if len(cn) >= n and cn[:n] in _SURNAMES_PINYIN:
+            sur_set = {_SURNAMES_PINYIN[cn[:n]]}
+            sur_len = n
+            break
+    if sur_set is None:
+        first = pinyin(cn[:1], style=Style.NORMAL, heteronym=True)[0]
+        sur_set = {o.upper() for o in first}
+        sur_len = 1
+    rest = cn[sur_len:]
+    # 名（可能多字、多音）→ 笛卡兒積展開所有讀音組合
+    given_set = {""}
+    if rest:
+        per = pinyin(rest, style=Style.NORMAL, heteronym=True)
+        for options in per:
+            opts = {o.upper() for o in options}
+            given_set = {g + o for g in given_set for o in opts}
+
+    def _clean(s):
+        return re.sub(r"[^A-Z]", "", s)  # 去 ü 等非 A-Z 字元
+
+    acceptable = set()
+    for s in sur_set:
+        s = _clean(s)
+        acceptable.add(s)                     # 只給姓
+        for g in given_set:
+            g = _clean(g)
+            acceptable.add(s + g)             # 姓 + 名
+            acceptable.add(g + s)             # 名 + 姓
+    acceptable.discard("")
+    return acceptable
 
 
 def verify_name_match(cn_name: str, en_name: str):
-    """比對中文姓名與英文姓名拼音是否一致。
+    """比對中文姓名與英文姓名拼音是否一致（嚴格音節比對）。
     回傳 (ok, message)：ok=True 表示相符或無法判斷；ok=False 附上提示訊息。
     判斷規則：
-      - 任一方為空 -> 無法比對，視為 ok
-      - 中文拼音 與 英文（去分隔符/空白）完全相等 -> ok
-      - 兩者為字母重排（順序不同，如 姓在後）-> ok
-      - 一方為另一方子序列（容許英文多稱謂/中間名，或中文只給姓）-> ok
-      - 其他（含不同字母）-> 視為不符，回傳提示
+      - 任一方為空、或無法轉拼音 -> 視為 ok（不誤報）
+      - 英文（去稱謂 MR/MS…、去分隔符）需完全等於下列其一才算相符：
+          · 姓+名、名+姓（多音字所有讀音組合皆納入）
+          · 只給姓（容許只填姓氏）
+      - 否則視為不符，回傳提示（附預期拼音）
     """
     cn = (cn_name or "").strip()
     en = (en_name or "").strip()
     if not cn or not en:
         return True, None
-    try:
-        cn_py = _cn_to_pinyin(cn)
-    except Exception:
-        return True, None
-    en_norm = re.sub(r"[^A-Z]", "", en.upper())
+    # 英文正規化：切 token → 去稱謂 → 只留 A-Z
+    tokens = [t for t in re.split(r"[,\s/\.．，、]+", en.upper()) if t]
+    tokens = [t for t in tokens if t not in _NAME_TITLES]
+    en_norm = re.sub(r"[^A-Z]", "", "".join(tokens))
     if not en_norm:
         return True, None
+    try:
+        acceptable = _cn_pinyin_acceptable(cn)
+    except Exception:
+        return True, None
+    if not acceptable:
+        return True, None
+    if en_norm in acceptable:
+        return True, None
 
-    if cn_py == en_norm:
-        return True, None
-    if sorted(cn_py) == sorted(en_norm):
-        return True, None
-    short, long = (cn_py, en_norm) if len(cn_py) <= len(en_norm) else (en_norm, cn_py)
-    if _is_subsequence(short, long):
-        return True, None
-
+    try:
+        expect = _cn_to_pinyin(cn)
+    except Exception:
+        expect = ""
+    tail = f"（預期拼音：{expect}）" if expect else ""
     return False, (
         f"⚠️ 中文姓名「{cn}」與英文姓名拼音「{en}」似乎不符，"
-        f"請確認英文拼音是否正確（預期拼音：{cn_py}）。"
+        f"請確認英文拼音是否正確{tail}。"
     )
 
 
