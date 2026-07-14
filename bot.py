@@ -81,10 +81,6 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         raw_text = ocr.ocr_image_bytes(bytes(data))
-    except ocr.TesseractNotInstalled:
-        await update.message.reply_text(
-            "⚠️ 證件 OCR 功能需要伺服器安裝 Tesseract，請聯絡管理員設定。")
-        return
     except Exception:
         logger.exception("OCR 失敗")
         await update.message.reply_text(
