@@ -8,7 +8,10 @@ services:
     name: booking-bot
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    # 證件 OCR 需要 Tesseract 與中文語言包；apt-get 裝好後再 pip 安裝依賴。
+    # 若你是從 GitHub 用此 render.yaml 建立 Bluepint，這段會生效；
+    # 若是既有的 Web Service，請到 Render 後台 Settings → Build Command 改成同一行。
+    buildCommand: apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-chi-tra tesseract-ocr-chi-sim && pip install -r requirements.txt
     startCommand: python bot.py
     envVars:
       - key: TELEGRAM_BOT_TOKEN

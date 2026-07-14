@@ -25,6 +25,7 @@ from telegram.ext import (
 )
 from fill import fill_booking, output_filename, verify_booking_names
 from parse_text import parse_booking_text, looks_like_booking
+import ocr
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -63,8 +64,63 @@ async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("\n".join(warns))
     except Exception:
         logger.exception("文字產檔失敗")
-    context.user_data.clear()
+    # 暫存原始文字，讓使用者之後單獨傳證件照片也能核對
+    context.user_data["last_text"] = update.message.text
     return
+
+
+async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """收到證件照片：OCR 識別，並與訂房文字核對（或僅回顯識別結果）。"""
+    try:
+        photo = update.message.photo[-1]
+        file = await photo.get_file()
+        data = await file.download_as_bytearray()
+    except Exception:
+        logger.exception("下載照片失敗")
+        return
+
+    try:
+        raw_text = ocr.ocr_image_bytes(bytes(data))
+    except ocr.TesseractNotInstalled:
+        await update.message.reply_text(
+            "⚠️ 證件 OCR 功能需要伺服器安裝 Tesseract，請聯絡管理員設定。")
+        return
+    except Exception:
+        logger.exception("OCR 失敗")
+        await update.message.reply_text(
+            "⚠️ 證件照片辨識失敗，請確認照片清晰或改為手動輸入。")
+        return
+
+    fields = ocr.extract_fields(raw_text)
+    logger.info("OCR 識別欄位：%s", fields)
+
+    # 文字來源：圖片 caption 優先，否則用上一次貼的訂房文字
+    caption = update.message.caption or ""
+    booking_text = caption if caption else context.user_data.get("last_text", "")
+
+    if booking_text and looks_like_booking(booking_text):
+        booking = parse_booking_text(booking_text)
+        # 同時產檔（與純文字訊息行為一致）
+        try:
+            bio = fill_booking(booking)
+            fn = output_filename(booking)
+            await update.message.reply_document(
+                document=bio, filename=fn,
+                caption="✅ 已從文字自動填入，訂房 Excel 請下載：")
+            ok, vwarns = verify_booking_names(booking)
+            if not ok:
+                await update.message.reply_text("\n".join(vwarns))
+        except Exception:
+            logger.exception("圖片訊息產檔失敗")
+        # 證件 OCR 與填寫內容比對
+        warns = ocr.verify_ocr_vs_booking(fields, booking)
+        if warns:
+            await update.message.reply_text("\n".join(warns))
+        else:
+            await update.message.reply_text("✅ 證件資料與填寫內容一致。")
+    else:
+        # 只有照片：回顯識別結果供人工確認
+        await update.message.reply_text(ocr.format_fields(fields))
 
 
 def _build_application(token):
@@ -72,6 +128,7 @@ def _build_application(token):
     不註冊任何指令，Telegram 不會顯示指令選單按鈕。"""
     app = Application.builder().token(token).build()
     app.add_handler(MessageHandler(BookingTextFilter(), text_entry))
+    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     return app
 
 
