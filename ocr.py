@@ -21,14 +21,8 @@ def _get_engine():
     global _ENGINE
     if _ENGINE is None:
         from paddleocr import PaddleOCR
-        _ENGINE = PaddleOCR(
-            use_angle_cls=True,   # 角度校正（對手機拍照很關鍵）
-            lang='ch',            # 中文（含英文識別）
-            use_gpu=False,        # Render 沒有 GPU
-            show_log=False,       # 不輸出調試資訊
-            det_db_thresh=0.3,    # text detection threshold
-            rec_char_type='ch',
-        )
+        # PaddleOCR 3.x API：只傳 lang，默認自動角度校正
+        _ENGINE = PaddleOCR(lang='ch')
     return _ENGINE
 
 
