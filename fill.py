@@ -125,24 +125,30 @@ def _norm_date(value):
 
 
 def split_en_name(en: str):
-    """把英文姓名拆成 (姓, 名)。
-    範例：'QU,SHENZHONG'  -> ('QU', 'SHENZHONG')   （逗號分隔）
-          'TANG/QINGPING' -> ('TANG', 'QINGPING')  （斜線分隔，護照常見格式）
-          'ZHOU.YINHUI'   -> ('ZHOU', 'YINHUI')    （點號分隔）
-          'SHEN DAN'      -> ('SHEN', 'DAN')        （中文習慣：第一個字是姓）
+    """把英文姓名拆成 (姓, 名)，並一律輸出大寫。
+    不論輸入是半形逗號、全形逗號、斜線、點號或空白分隔，都會正確拆開。
+    範例：'QU,SHENZHONG'   -> ('QU', 'SHENZHONG')
+          'TANG/QINGPING'  -> ('TANG', 'QINGPING')
+          'ZHOU.YINHUI'    -> ('ZHOU', 'YINHUI')
+          'SHEN DAN'       -> ('SHEN', 'DAN')
+          'QIU，JIELEI'    -> ('QIU', 'JIELEI')  （全形逗號）
+          'qiu,jielei'     -> ('QIU', 'JIELEI')  （強制大寫）
     """
     en = (en or "").strip()
     if not en:
         return "", ""
+    # 全形逗號先統一成半形逗號
+    en = en.replace("，", ",")
     # 逗號 / 斜線 / 點號分隔：前=姓 後=名
     for sep in (",", "/", "."):
         if sep in en:
             a, b = en.split(sep, 1)
-            return a.strip(), b.strip()
+            return a.strip().upper(), b.strip().upper()
+    # 純空白分隔：中文習慣第一個字是姓
     toks = en.split()
     if len(toks) >= 2:
-        return toks[0], " ".join(toks[1:])
-    return "", en
+        return toks[0].upper(), " ".join(toks[1:]).upper()
+    return "", en.upper()
 
 
 def _set_merged_cell(ws, coord, value):
