@@ -111,30 +111,44 @@ async def _download_photo_source(update):
     return bytes(data), None
 
 
+async def _safe_reply(update, text):
+    """安全回覆：reply_text 失敗時只記 log，不讓異常傳播導致靜默無反應。"""
+    try:
+        await update.effective_message.reply_text(text)
+    except Exception:
+        logger.exception("reply_text 失敗")
+
+
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """收到證件照片：OCR 識別，並與訂房文字核對（或僅回顯識別結果）。"""
     logger.info("photo_handler triggered: msg_id=%s", update.effective_message.message_id if update.effective_message else None)
+
+    # 立即回覆「處理中」，讓使用者知道 Bot 收到了（避免長時間靜默）
+    await _safe_reply(update, "📸 收到照片，正在辨識中，請稍候 10~30 秒…")
+
     data, err = await _download_photo_source(update)
     if err == "not_image":
-        await update.effective_message.reply_text(
+        await _safe_reply(update,
             "【注意】我看得懂「訂房文字」或直接傳送的「證件照片」。\n"
             "請直接傳送照片（不要用「檔案」方式傳送）；若以檔案傳送，請確認是圖片格式。")
         return
     if err in ("download_fail", "empty"):
-        await update.effective_message.reply_text(
+        await _safe_reply(update,
             "【注意】證件照片下載失敗，請重試一次，或改為手動輸入。")
         return
 
+    # OCR 是同步阻塞呼叫，用 to_thread 放到執行緒池避免卡住事件循環
     try:
-        raw_text = ocr.ocr_image_bytes(data)
+        raw_text = await asyncio.to_thread(ocr.ocr_image_bytes, data)
     except Exception:
         logger.exception("OCR 失敗")
-        await update.effective_message.reply_text(
+        await _safe_reply(update,
             "【注意】證件照片辨識失敗，請確認照片清晰或改為手動輸入。")
         return
 
     fields = ocr.extract_fields(raw_text)
     logger.info("OCR 識別欄位：%s | 原文長度 %d", fields, len(raw_text or ""))
+    logger.info("OCR 原文前 500 字：%s", (raw_text or "")[:500])
 
     # 文字來源：圖片 caption 優先，否則用上一次貼的訂房文字
     caption = update.message.caption or ""
@@ -145,11 +159,11 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # 只比對證件 OCR 結果與填寫內容，不產 Excel
         warns = ocr.verify_ocr_vs_booking(fields, booking)
         if warns:
-            await update.message.reply_text("\n".join(warns))
+            await _safe_reply(update, "\n".join(warns))
         else:
-            await update.message.reply_text("✅ 證件資料與填寫內容一致。")
+            await _safe_reply(update, "✅ 證件資料與填寫內容一致。")
     else:
-        await update.message.reply_text(ocr.format_fields(fields))
+        await _safe_reply(update, ocr.format_fields(fields))
 
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -160,7 +174,7 @@ async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg.chat.type if msg else None,
                 bool(msg.photo) if msg else None,
                 bool(msg.document) if msg else None)
-    await update.effective_message.reply_text(
+    await _safe_reply(update,
         "我看得懂兩種訊息：\n"
         "1. 直接貼上訂房文字（入住/退房/飯店/房型/件數…）\n"
         "2. 傳送證件照片（請用「照片」方式，不要用「檔案」）")
@@ -192,6 +206,12 @@ async def _run_webhook_server(app, base):
     await app.initialize()
     await app.start()
     logger.info("webhook 已設定：%s", url)
+
+    # 預熱 OCR 引擎：在啟動時載入模型，避免第一次真實請求時才載入（耗 30~60 秒）
+    try:
+        ocr.warmup()
+    except Exception:
+        logger.exception("OCR 預熱失敗（不影響啟動，首次請求時會再載入）")
 
     async def handle_webhook(request):
         if WEBHOOK_SECRET and \

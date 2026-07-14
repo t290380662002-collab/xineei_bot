@@ -36,6 +36,20 @@ def paddleocr_ready():
         return False
 
 
+def warmup():
+    """預熱引擎：建立實例 + 跑一張 dummy 圖，確保模型已載入。
+    在服務啟動時調用，避免第一次真實 OCR 請求時模型載入耗時 30~60 秒。"""
+    import numpy as np
+    logger.info("PaddleOCR 引擎預熱中…")
+    engine = _get_engine()
+    dummy = np.zeros((10, 10, 3), dtype=np.uint8)
+    try:
+        engine.ocr(dummy)
+    except Exception:
+        pass  # dummy 圖無文字，異常可忽略
+    logger.info("PaddleOCR 引擎預熱完成")
+
+
 # ---------------------------------------------------------------------------
 # 卡片區域自動裁剪
 # ---------------------------------------------------------------------------
