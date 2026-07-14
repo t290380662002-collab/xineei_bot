@@ -6,8 +6,12 @@
 import re
 import openpyxl
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from config import HOTELS, TEMPLATES_DIR, resolve_hotel
+
+# 台灣時區（GMT+8，無日光節約時間）；Render 伺服器為 UTC，
+# 填表日期必須用台灣時間，否則會慢一天。
+TAIWAN_TZ = timezone(timedelta(hours=8))
 
 # 簡體/繁體 與常見異體字正規化（讓使用者打的簡稱對到模板正式名）
 _CHAR_MAP = {
@@ -52,10 +56,10 @@ def _norm_date(value):
         return f"{int(y):04d}/{int(mo):02d}/{int(d):02d}"
     m = re.match(r"^(\d{1,2})月(\d{1,2})日?$", s)
     if m:
-        return f"{datetime.now().year:04d}/{int(m.group(1)):02d}/{int(m.group(2)):02d}"
+        return f"{datetime.now(TAIWAN_TZ).year:04d}/{int(m.group(1)):02d}/{int(m.group(2)):02d}"
     m = re.match(r"^(\d{1,2})[./\-](\d{1,2})$", s)
     if m:
-        return f"{datetime.now().year:04d}/{int(m.group(1)):02d}/{int(m.group(2)):02d}"
+        return f"{datetime.now(TAIWAN_TZ).year:04d}/{int(m.group(1)):02d}/{int(m.group(2)):02d}"
     return s
 
 
@@ -148,7 +152,7 @@ def fill_booking(booking: dict) -> BytesIO:
 
     # 填表日期（右下角 Date: 後面的底線格；只填日期值，保留模板藍色字體格式）
     if "date" in mc:
-        _set_merged_cell(mws, mc["date"], datetime.now().strftime('%Y/%m/%d'))
+        _set_merged_cell(mws, mc["date"], datetime.now(TAIWAN_TZ).strftime('%Y/%m/%d'))
 
     # 備注 + 吸煙
     remark = (booking.get("備注", "") or "").strip()
