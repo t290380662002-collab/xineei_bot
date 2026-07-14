@@ -407,3 +407,69 @@ def output_filename(booking: dict) -> str:
     g0 = (booking.get("guests") or [{}])[0]
     name = g0.get("cn_name") or g0.get("en_name") or ""
     return f"訂房_{hotel}_{name}.xlsx"
+
+
+# ---------------------------------------------------------------------------
+# 中文 / 英文姓名拼音自動核對
+# ---------------------------------------------------------------------------
+def _cn_to_pinyin(cn: str) -> str:
+    """把中文姓名轉成無聲調、無空白的大寫拼音（如 张依婷 -> ZHANGYITING）。"""
+    from pypinyin import lazy_pinyin
+    return "".join(lazy_pinyin(str(cn))).upper()
+
+
+def _is_subsequence(a: str, b: str) -> bool:
+    """a 是否為 b 的子序列（字元順序一致、可跳過 b 中部分字元）。"""
+    it = iter(b)
+    return all(ch in it for ch in a)
+
+
+def verify_name_match(cn_name: str, en_name: str):
+    """比對中文姓名與英文姓名拼音是否一致。
+    回傳 (ok, message)：ok=True 表示相符或無法判斷；ok=False 附上提示訊息。
+    判斷規則：
+      - 任一方為空 -> 無法比對，視為 ok
+      - 中文拼音 與 英文（去分隔符/空白）完全相等 -> ok
+      - 兩者為字母重排（順序不同，如 姓在後）-> ok
+      - 一方為另一方子序列（容許英文多稱謂/中間名，或中文只給姓）-> ok
+      - 其他（含不同字母）-> 視為不符，回傳提示
+    """
+    cn = (cn_name or "").strip()
+    en = (en_name or "").strip()
+    if not cn or not en:
+        return True, None
+    try:
+        cn_py = _cn_to_pinyin(cn)
+    except Exception:
+        return True, None
+    en_norm = re.sub(r"[^A-Z]", "", en.upper())
+    if not en_norm:
+        return True, None
+
+    if cn_py == en_norm:
+        return True, None
+    if sorted(cn_py) == sorted(en_norm):
+        return True, None
+    short, long = (cn_py, en_norm) if len(cn_py) <= len(en_norm) else (en_norm, cn_py)
+    if _is_subsequence(short, long):
+        return True, None
+
+    return False, (
+        f"⚠️ 中文姓名「{cn}」與英文姓名拼音「{en}」似乎不符，"
+        f"請確認英文拼音是否正確（預期拼音：{cn_py}）。"
+    )
+
+
+def verify_booking_names(booking: dict):
+    """核對訂房資料中所有入住者的 中文/英文 姓名拼音。
+    回傳 (all_ok, warnings) ；warnings 為不符的提示清單。
+    """
+    guests = booking.get("guests") or []
+    warnings = []
+    for i, g in enumerate(guests, 1):
+        ok, msg = verify_name_match(g.get("cn_name", ""), g.get("en_name", ""))
+        if not ok and msg:
+            prefix = f"第{i}位入住者：" if len(guests) > 1 else ""
+            warnings.append(prefix + msg)
+    return (len(warnings) == 0, warnings)
+

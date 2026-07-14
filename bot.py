@@ -23,7 +23,7 @@ from telegram.ext import (
     Application, MessageHandler, ContextTypes,
     filters,
 )
-from fill import fill_booking, output_filename
+from fill import fill_booking, output_filename, verify_booking_names
 from parse_text import parse_booking_text, looks_like_booking
 
 logging.basicConfig(level=logging.INFO)
@@ -57,6 +57,10 @@ async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_document(
             document=bio, filename=fn,
             caption="✅ 已從文字自動填入，訂房 Excel 請下載：")
+        # 中文 / 英文姓名拼音自動核對：不符時提示使用者確認
+        ok, warns = verify_booking_names(booking)
+        if not ok:
+            await update.message.reply_text("\n".join(warns))
     except Exception:
         logger.exception("文字產檔失敗")
     context.user_data.clear()
