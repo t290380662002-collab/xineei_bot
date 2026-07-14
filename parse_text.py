@@ -28,6 +28,7 @@ from datetime import datetime
 STANDARD = [
     "入住", "退房", "飯店", "房型", "件數", "備注", "是否吸煙",
     "入住者中文", "入住者英文", "出生年月日", "證件號碼",
+    "代理", "訂單編號",
 ]
 
 # 別名 → 標準欄位
@@ -45,6 +46,9 @@ ALIASES = {
     "dob": "出生年月日", "birth": "出生年月日",
     "證件": "證件號碼", "证件": "證件號碼", "證件號": "證件號碼", "证件号": "證件號碼",
     "id": "證件號碼", "護照": "證件號碼", "passport": "證件號碼",
+    "代理": "代理", "agent": "代理", "代理商": "代理", "渠道": "代理",
+    "訂單編號": "訂單編號", "訂單": "訂單編號", "單號": "訂單編號",
+    "order": "訂單編號", "orderno": "訂單編號", "order no": "訂單編號",
 }
 
 # 所有可用作「標籤」的字串（標準欄位 + 別名），用於整段掃描
@@ -63,18 +67,33 @@ _BARE_LABEL_RE = re.compile(r"^\s*(?P<lab>" + _LABEL_ALT + r")\s*$")
 #   房型 / 飯店 / 姓名 直接接續；備注 用「；」分隔。
 _WRAPPABLE = {"房型", "飯店", "入住者中文", "入住者英文", "備注"}
 
-# 這些獨立代碼不寫入備注（使用者指定：SS / AT / WW / MM 等標記）。
-# 比對時前後不能緊鄰英文字母（避免誤刪像 ASS 之類的字），但可緊鄰中文。
-SKIP_TOKENS = {"SS", "AT", "WW", "MM"}
+# 訂房文字中常出現的「代理」代碼（也是過去會被從備注剔除的 SS/AT/WW/MM 等）。
+# 現在改為辨識成「代理」欄位，不再當作備注雜訊剔除。
+AGENT_CODES = {"AT", "SS", "私域", "WW", "MM", "ALEN"}
+
+# 備注黑名單（已無需剔除的代理代碼，此處留空；如需剔除其他雜訊再加回）。
+SKIP_TOKENS = set()
 _SKIP_RE = re.compile(
     r"(?<![A-Za-z])(" + "|".join(re.escape(t) for t in SKIP_TOKENS) + r")(?![A-Za-z])",
     re.IGNORECASE,
 )
 
 
+def _match_agent(seg):
+    """若整段文字就是一個代理代碼（AT/SS/私域/WW/MM/ALEN），回傳該代碼，否則 None。"""
+    if not seg:
+        return None
+    s = re.sub(r"\s+", "", str(seg)).upper()
+    for code in AGENT_CODES:
+        if s == code.upper():
+            return code
+    return None
+
+
 def _clean_remark(s):
-    """移除備注中的黑名單代碼（SS/AT/WW/MM…），並正規化空白與分隔符。"""
-    s = _SKIP_RE.sub("", s or "")
+    """移除備注中的黑名單代碼（目前無），並正規化空白與分隔符。"""
+    if SKIP_TOKENS:
+        s = _SKIP_RE.sub("", s or "")
     s = re.sub(r"[\s；;]+", "；", s).strip("；; ").strip()
     return s
 
@@ -130,6 +149,12 @@ def _extract_pairs(text):
             continue
         # 一般續行文字
         seg = line.strip()
+        # 代理代碼獨立成行（AT/SS/私域/WW/MM/ALEN）→ 視為「代理」欄位。
+        # 優先於「續行併回上一欄位」判斷，避免被誤併進 入住者英文/飯店 等欄位。
+        agent = _match_agent(seg)
+        if agent and not any(f == "代理" for f, _ in pairs):
+            pairs.append(("代理", agent))
+            continue
         if last_field in _WRAPPABLE:
             if last_field == "備注":
                 cleaned = _clean_remark(seg)
@@ -233,5 +258,7 @@ def parse_booking_text(text):
         "件數": raw.get("件數", ""),
         "備注": raw.get("備注", ""),
         "是否吸煙": raw.get("是否吸煙", ""),
+        "代理": raw.get("代理", ""),
+        "訂單編號": raw.get("訂單編號", ""),
         "guests": guests,
     }

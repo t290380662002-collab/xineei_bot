@@ -46,6 +46,50 @@ def _core(s):
     return s
 
 
+# ---------------------------------------------------------------------------
+# 訂單摘要 Sheet：固定在產出的 Excel 加一張「訂單摘要」，列出
+# 代理 / 訂單編號 / 英文姓名 / 中文姓名 / 入住日期 / 退房日期 / 晚數。
+# （與原本的客人清單 Sheet1 互不干擾）
+# ---------------------------------------------------------------------------
+SUMMARY_SHEET = "訂單摘要"
+SUMMARY_HEADERS = ["代理", "訂單編號", "英文姓名", "中文姓名", "入住日期", "退房日期", "晚數"]
+
+
+def _nights(checkin, checkout):
+    """由 入住 / 退房 計算晚數；失敗或無效回傳空字串。"""
+    try:
+        a = datetime.strptime(_norm_date(checkin), "%Y/%m/%d")
+        b = datetime.strptime(_norm_date(checkout), "%Y/%m/%d")
+        n = (b - a).days
+        return n if n > 0 else ""
+    except Exception:
+        return ""
+
+
+def _fill_summary_sheet(wb, booking, guests, primary):
+    if SUMMARY_SHEET in wb.sheetnames:
+        ws = wb[SUMMARY_SHEET]
+    else:
+        ws = wb.create_sheet(SUMMARY_SHEET)
+
+    for c, h in enumerate(SUMMARY_HEADERS, start=1):
+        ws.cell(row=1, column=c, value=h)
+
+    sur, fir = split_en_name(primary.get("en_name", ""))
+    en_full = " ".join(x for x in (sur, fir) if x).strip()
+    row = [
+        booking.get("代理", ""),
+        booking.get("訂單編號", ""),
+        en_full,
+        primary.get("cn_name", ""),
+        _norm_date(booking.get("入住", "")),
+        _norm_date(booking.get("退房", "")),
+        _nights(booking.get("入住", ""), booking.get("退房", "")),
+    ]
+    for c, v in enumerate(row, start=1):
+        ws.cell(row=2, column=c, value=v)
+
+
 def _norm_date(value):
     s = re.sub(r"\s+", "", str(value or "")).strip()
     if not s:
@@ -201,6 +245,9 @@ def fill_booking(booking: dict) -> BytesIO:
                 gws[f"{gc['roomtype']}{r}"] = booking.get("房型", "")
             if "smoking" in gc:
                 gws[f"{gc['smoking']}{r}"] = smoking
+
+    # ---- 訂單摘要 Sheet（固定新增，與客人清單並存）----
+    _fill_summary_sheet(wb, booking, guests, primary)
 
     bio = BytesIO()
     wb.save(bio)
