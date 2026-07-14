@@ -157,11 +157,6 @@ def fill_booking(booking: dict) -> BytesIO:
         # 名匯有專屬「不吸煙」欄，其他家把吸煙資訊併入備注（只寫「不吸煙」/「吸煙」）
         remark = (remark + f"；{smoking}").strip("；")
 
-    # 房型：不再於模板打勾（避免變更勾選格），改以文字記錄在備注
-    room_raw = (booking.get("房型", "") or "").strip()
-    if room_raw:
-        remark = (remark + f"；房型：{room_raw}").strip("；")
-
     # 寫入備注：若該格原本就含欄位標籤（如「特別要求 Special request :」），
     # 保留標籤並把實際備注接在後面，避免覆蓋掉欄位名稱。
     existing = mws[mc["remark"]].value
