@@ -107,20 +107,35 @@ def main():
 
     app = _build_application(token)
     base = _webhook_base_url()
+    logger.info("啟動診斷: RENDER_EXTERNAL_URL=%s WEBHOOK_URL=%s PORT=%s",
+                os.environ.get("RENDER_EXTERNAL_URL"),
+                os.environ.get("WEBHOOK_URL"),
+                os.environ.get("PORT"))
 
     if base:
         # ---- Webhook 模式（Render Web Service）----
         app.post_init = _set_webhook
         app.post_stop = _clear_webhook
         port = int(os.environ.get("PORT", 10000))
-        logger.info("Bot 啟動中 (webhook) -> %s%s", base.rstrip("/"), WEBHOOK_PATH)
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=port,
-            url_path=WEBHOOK_PATH,
-            secret_token=WEBHOOK_SECRET,
-            drop_pending_updates=True,
-        )
+        logger.info("Bot 啟動中 (webhook) -> %s%s | PORT=%s", base.rstrip("/"), WEBHOOK_PATH, port)
+        # Render 會對 healthCheckPath 做 HTTP 探活，需回 200；否則部署會被判失敗
+        from aiohttp import web
+        health_app = web.Application()
+        async def _health(_req):
+            return web.Response(text="ok", status=200)
+        health_app.router.add_get("/", _health)
+        try:
+            app.run_webhook(
+                listen="0.0.0.0",
+                port=port,
+                url_path=WEBHOOK_PATH,
+                secret_token=WEBHOOK_SECRET,
+                web_app=health_app,
+                drop_pending_updates=True,
+            )
+        except Exception as e:
+            logger.exception("run_webhook 啟動失敗：%s", e)
+            raise
     else:
         # ---- Polling 模式（本機開發備援）----
         app.post_init = _clear_webhook
