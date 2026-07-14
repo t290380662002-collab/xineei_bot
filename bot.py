@@ -87,12 +87,10 @@ async def _download_photo_source(update):
     src = None
     if msg.photo:
         src = msg.photo[-1]
-    elif doc is not None and (mime or ext):
-        # 任意 document：只要 mime 是 image/* 或副檔名是圖片，就當作圖片處理
-        if (mime and mime.startswith("image/")) or ext in {
-            "jpg", "jpeg", "png", "bmp", "gif", "tiff", "tif", "webp"
-        }:
-            src = doc
+    elif doc is not None:
+        # 任意 document 都嘗試下載（含以檔案方式傳送的圖片）；
+        # 非圖片會在 OCR 階段由 PIL 拋錯並給使用者可見提示，避免靜默無反應
+        src = doc
     if src is None:
         return None, "not_image"
     try:
@@ -180,7 +178,8 @@ def _build_application(token):
     app = Application.builder().token(token).build()
     text_filter = BookingTextFilter()
     # 照片/圖片：同時接受 photo 與任意 document（彈性處理各種傳送方式）
-    photo_filter = filters.PHOTO | filters.Document
+    # 注意：filters.Document 是類別本身，不能直接 |，須用實例 Document.ALL
+    photo_filter = filters.PHOTO | filters.Document.ALL
     app.add_handler(MessageHandler(text_filter, text_entry))
     app.add_handler(MessageHandler(photo_filter, photo_handler))
     # 兜底：只有非文字、非照片/图片檔案时才提示，避免误触发
