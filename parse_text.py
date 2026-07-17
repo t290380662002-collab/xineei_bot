@@ -42,6 +42,7 @@ ALIASES = {
     "吸煙": "是否吸煙", "吸烟": "是否吸煙", "smoking": "是否吸煙",
     "中文姓名": "入住者中文", "姓名": "入住者中文", "住客中文": "入住者中文", "名字": "入住者中文",
     "英文姓名": "入住者英文", "住客英文": "入住者英文", "ename": "入住者英文",
+    "訂房人中文": "入住者中文", "訂房人英文": "入住者英文",
     "出生": "出生年月日", "生日": "出生年月日", "出生日期": "出生年月日",
     "dob": "出生年月日", "birth": "出生年月日",
     "證件": "證件號碼", "证件": "證件號碼", "證件號": "證件號碼", "证件号": "證件號碼",
@@ -69,7 +70,7 @@ _WRAPPABLE = {"房型", "飯店", "入住者中文", "入住者英文", "備注"
 
 # 訂房文字中常出現的「代理」代碼（也是過去會被從備注剔除的 SS/AT/WW/MM 等）。
 # 現在改為辨識成「代理」欄位，不再當作備注雜訊剔除。
-AGENT_CODES = {"AT", "SS", "私域", "WW", "MM", "M", "ALEN"}
+AGENT_CODES = {"AT", "SS", "私域", "WW", "MM", "M", "ALEN", "舅"}
 
 # 備注黑名單（已無需剔除的代理代碼，此處留空；如需剔除其他雜訊再加回）。
 SKIP_TOKENS = set()
@@ -198,21 +199,33 @@ def _norm_rooms(value):
 
 
 def _norm_date(value):
-    s = re.sub(r"\s+", "", str(value or "")).strip()
+    s = re.sub(r"\s+", " ", str(value or "")).strip()
     if not s:
         return ""
+    # DD MON YYYY（如 18 AUG 1984）
+    m = re.match(
+        r"^(\d{1,2})\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{4})$",
+        s, re.IGNORECASE,
+    )
+    if m:
+        d, mon, y = m.groups()
+        months = {"JAN":1,"FEB":2,"MAR":3,"APR":4,"MAY":5,"JUN":6,
+                  "JUL":7,"AUG":8,"SEP":9,"OCT":10,"NOV":11,"DEC":12}
+        return f"{int(y):04d}/{months[mon.upper()]:02d}/{int(d):02d}"
+    # 去空白後的日期匹配（後續模式假設已去空白）
+    s_nospace = re.sub(r"\s+", "", s)
     # 完整日期 YYYY/M/D 或 YYYY.M.D
-    m = re.match(r"^(\d{4})[./\-](\d{1,2})[./\-](\d{1,2})$", s)
+    m = re.match(r"^(\d{4})[./\-](\d{1,2})[./\-](\d{1,2})$", s_nospace)
     if m:
         y, mo, d = m.groups()
         return f"{int(y):04d}/{int(mo):02d}/{int(d):02d}"
     # 中文 M月D日（無年份）→ 補今年
-    m = re.match(r"^(\d{1,2})月(\d{1,2})日?$", s)
+    m = re.match(r"^(\d{1,2})月(\d{1,2})日?$", s_nospace)
     if m:
         mo, d = int(m.group(1)), int(m.group(2))
         return f"{datetime.now().year:04d}/{mo:02d}/{d:02d}"
     # M/D 或 M.D（無年份）→ 補今年
-    m = re.match(r"^(\d{1,2})[./\-](\d{1,2})$", s)
+    m = re.match(r"^(\d{1,2})[./\-](\d{1,2})$", s_nospace)
     if m:
         mo, d = int(m.group(1)), int(m.group(2))
         return f"{datetime.now().year:04d}/{mo:02d}/{d:02d}"
