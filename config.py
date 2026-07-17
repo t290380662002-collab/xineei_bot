@@ -320,11 +320,19 @@ def _norm_hotel(name: str) -> str:
 
 
 def resolve_hotel(name: str):
-    """把使用者輸入的飯店名對到內部 key（含簡繁/異體字容錯）。"""
+    """把使用者輸入的飯店名對到內部 key（含簡繁/異體字容錯）。
+    當輸入含多個飯店名時（如「倫敦人御園」同時命中「倫敦人」與「御園」），
+    優先取出現在字串較後方的匹配（後綴通常才是真正要的飯店）。"""
     if not name:
         return None
     n = _norm_hotel(name)
+    matches = []
     for key in HOTEL_KEYS:
-        if _norm_hotel(key) in n or key in n:
-            return key
-    return None
+        nk = _norm_hotel(key)
+        if nk in n:
+            matches.append((n.index(nk), len(nk), key))
+    if not matches:
+        return None
+    # 排序：字串中位置越後越優先（取後綴）；位置相同時較長者優先
+    matches.sort(key=lambda x: (-x[0], -x[1]))
+    return matches[0][2]
