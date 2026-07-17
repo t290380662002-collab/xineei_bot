@@ -476,6 +476,58 @@ _NAME_TITLES = {
     "SIR", "PROF",
 }
 
+# 台灣/香港常見羅馬拼音對照（大陸拼音 → 各地變體）
+# 用於中文姓名核對：只要符合大陸拼音 或 台灣/香港拼音其一，就不提示。
+_SURNAME_TW_VARIANTS = {
+    # 大陸拼音 → {台灣/香港變體}
+    "LI": {"LEE"},          # 李
+    "WANG": {"WONG"},       # 王（香港）
+    "ZHANG": {"CHANG"},     # 張
+    "ZHENG": {"CHENG"},     # 鄭
+    "ZHOU": {"CHOU"},       # 周
+    "ZHU": {"CHU"},         # 朱
+    "ZHAO": {"CHAO"},       # 趙
+    "XU": {"HSU"},          # 徐 / 許
+    "XIAO": {"HSIAO"},      # 蕭
+    "XIE": {"HSIEH"},       # 謝
+    "QIU": {"CHIU"},        # 邱
+    "QIAN": {"CHIEN"},      # 錢
+    "QIN": {"CHIN"},        # 秦
+    "GUO": {"KUO"},         # 郭
+    "CAI": {"TSAI"},        # 蔡
+    "ZENG": {"TSENG"},      # 曾
+    "JIANG": {"CHIANG"},    # 蔣 / 江
+    "JIA": {"CHIA"},        # 賈
+    "CHEN": {"CHAN"},        # 陳（香港）
+    "LIU": {"LAU"},         # 劉（香港）
+    "HUANG": {"WONG"},      # 黃（香港）
+    "HE": {"HO"},           # 何（香港）
+    "LUO": {"LO"},          # 羅（香港）
+    "WU": {"NG"},           # 吳（香港）
+    "LIN": {"LAM"},         # 林（香港）
+    "YANG": {"YEUNG"},      # 楊（香港）
+}
+
+# Wade-Giles 聲母對應表（用於名字部分的大陸→台灣轉換）
+_WG_INITIAL_MAP = [
+    ("ZH", "CH"), ("CH", "CH"), ("SH", "SH"),
+    ("X", "HS"),   ("Q", "CH"),
+    ("C", "TS"),   ("Z", "TS"),
+    ("J", "CH"),   ("G", "K"),
+]
+
+
+def _to_wade_giles(py: str) -> set:
+    """把一個音節的大陸拼音轉成所有可能的 Wade-Giles 變體。"""
+    py = py.upper()
+    out = {py}
+    for mp, wg in _WG_INITIAL_MAP:
+        if py.startswith(mp):
+            wg_var = wg + py[len(mp):]
+            out.add(wg_var)
+            break  # 只換第一組匹配的聲母
+    return out
+
 
 def _cn_to_pinyin(cn: str) -> str:
     """把中文姓名轉成無聲調、無空白的大寫拼音（如 张依婷 -> ZHANGYITING）。
@@ -492,7 +544,8 @@ def _cn_to_pinyin(cn: str) -> str:
 
 def _cn_pinyin_acceptable(cn: str):
     """回傳中文姓名可接受的英文全拼集合（大寫、無分隔）。
-    涵蓋：姓+名、名+姓、只給姓；並用多音字所有讀音組合擴充，降低誤報。
+    涵蓋：姓+名、名+姓、只給姓；多音字所有讀音組合；
+    **台灣/香港拼音變體**（如 李=LI/LEE、張=ZHANG/CHANG）。
     無法轉拼音時回傳 None。
     """
     from pypinyin import pinyin, Style
@@ -500,24 +553,32 @@ def _cn_pinyin_acceptable(cn: str):
     if not cn:
         return None
     # 決定姓（複姓優先），姓拼音優先取權威表
-    sur_len, sur_set = 0, None
+    sur_len, sur_set = 0, set()
     for n in (2, 1):
         if len(cn) >= n and cn[:n] in _SURNAMES_PINYIN:
-            sur_set = {_SURNAMES_PINYIN[cn[:n]]}
+            sur_py = _SURNAMES_PINYIN[cn[:n]]
+            sur_set = {sur_py}
+            # 加台灣/香港變體
+            sur_set |= _SURNAME_TW_VARIANTS.get(sur_py, set())
             sur_len = n
             break
-    if sur_set is None:
+    if not sur_set:
         first = pinyin(cn[:1], style=Style.NORMAL, heteronym=True)[0]
         sur_set = {o.upper() for o in first}
+        # 對每種讀音加入 Wade-Giles 變體（無權威表時）
+        for o in list(sur_set):
+            sur_set |= _to_wade_giles(o)
         sur_len = 1
     rest = cn[sur_len:]
-    # 名（可能多字、多音）→ 笛卡兒積展開所有讀音組合
+    # 名（可能多字、多音）→ 笛卡兒積展開所有讀音組合，並加入 Wade-Giles 變體
     given_set = {""}
     if rest:
         per = pinyin(rest, style=Style.NORMAL, heteronym=True)
         for options in per:
-            opts = {o.upper() for o in options}
-            given_set = {g + o for g in given_set for o in opts}
+            expanded = set()
+            for o in options:
+                expanded |= _to_wade_giles(o.upper())
+            given_set = {g + o for g in given_set for o in expanded}
 
     def _clean(s):
         return re.sub(r"[^A-Z]", "", s)  # 去 ü 等非 A-Z 字元
@@ -525,11 +586,11 @@ def _cn_pinyin_acceptable(cn: str):
     acceptable = set()
     for s in sur_set:
         s = _clean(s)
-        acceptable.add(s)                     # 只給姓
+        acceptable.add(s)
         for g in given_set:
             g = _clean(g)
-            acceptable.add(s + g)             # 姓 + 名
-            acceptable.add(g + s)             # 名 + 姓
+            acceptable.add(s + g)
+            acceptable.add(g + s)
     acceptable.discard("")
     return acceptable
 
@@ -567,7 +628,7 @@ def verify_name_match(cn_name: str, en_name: str):
         expect = _cn_to_pinyin(cn)
     except Exception:
         expect = ""
-    tail = f"（預期拼音：{expect}）" if expect else ""
+    tail = f"（大陸拼音：{expect}；台灣/香港如 LEE/CHANG/HSU 也接受）" if expect else ""
     return False, (
         f"⚠️ 中文姓名「{cn}」與英文姓名拼音「{en}」似乎不符，"
         f"請確認英文拼音是否正確{tail}。"
