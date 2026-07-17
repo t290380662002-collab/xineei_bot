@@ -407,8 +407,8 @@ def fill_booking(booking: dict) -> BytesIO:
     # 備注 + 吸煙
     remark = (booking.get("備注", "") or "").strip()
     smoking = (booking.get("是否吸煙", "") or "").strip()
-    if smoking and hotel_key != "名匯":
-        # 名匯有專屬「不吸煙」欄，其他家把吸煙資訊併入備注（只寫「不吸煙」/「吸煙」）
+    if smoking:
+        # 所有飯店都把吸煙資訊併入備注（名匯除「不吸煙」專欄外，主表「特別要求」也顯示）
         remark = (remark + f"；{smoking}").strip("；")
 
     # 寫入備注：若該格原本就含欄位標籤（如「特別要求 Special request :」），
