@@ -107,20 +107,79 @@ def _fill_summary_sheet(wb, booking, guests, primary):
         ws.column_dimensions[col_letter].width = max(need, 8)
 
 
+_MONTHS_EN = {"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+               "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12}
+
+
 def _norm_date(value):
-    s = re.sub(r"\s+", "", str(value or "")).strip()
+    """把任意常見日期格式歸一為 YYYY/MM/DD。支援：
+    - YYYY/M/D、YYYY.M.D、YYYY-M-D
+    - YYYY年M月D日
+    - YYYYMMDD（8 位純數字）
+    - DD/MM/YYYY、DD.MM.YYYY、DD-MMM-YYYY（啟發式：任一 >12 則唯一確定，否則預設 DD/MM）
+    - DD MON YYYY（如 18 AUG 1984，大小寫不敏感，可含空白）
+    - M月D日、M/D、M.D（無年份）→ 補台灣當年
+    無法解析時原樣保留。
+    """
+    s = re.sub(r"\s+", " ", str(value or "")).strip()
     if not s:
         return ""
-    m = re.match(r"^(\d{4})[./\-](\d{1,2})[./\-](\d{1,2})$", s)
+
+    # DD MON YYYY（如 "18 AUG 1984"、"18-Aug-1984"、"18AUG1984"）
+    m = re.match(
+        r"^(\d{1,2})[ ./\-]*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)"
+        r"[A-Z]*[ ./\-]*(\d{4})$",
+        s, re.IGNORECASE,
+    )
+    if m:
+        d, mon, y = m.groups()
+        return f"{int(y):04d}/{_MONTHS_EN[mon.upper()[:3]]:02d}/{int(d):02d}"
+
+    # 去空白後比對
+    s_nospace = re.sub(r"\s+", "", s)
+
+    # 8 位純數字 YYYYMMDD
+    m = re.match(r"^(\d{4})(\d{2})(\d{2})$", s_nospace)
     if m:
         y, mo, d = m.groups()
         return f"{int(y):04d}/{int(mo):02d}/{int(d):02d}"
-    m = re.match(r"^(\d{1,2})月(\d{1,2})日?$", s)
+
+    # YYYY/M/D、YYYY.M.D、YYYY-M-D
+    m = re.match(r"^(\d{4})[./\-](\d{1,2})[./\-](\d{1,2})$", s_nospace)
     if m:
-        return f"{datetime.now(TAIWAN_TZ).year:04d}/{int(m.group(1)):02d}/{int(m.group(2)):02d}"
-    m = re.match(r"^(\d{1,2})[./\-](\d{1,2})$", s)
+        y, mo, d = m.groups()
+        return f"{int(y):04d}/{int(mo):02d}/{int(d):02d}"
+
+    # YYYY年M月D日
+    m = re.match(r"^(\d{4})年(\d{1,2})月(\d{1,2})日?$", s_nospace)
     if m:
-        return f"{datetime.now(TAIWAN_TZ).year:04d}/{int(m.group(1)):02d}/{int(m.group(2)):02d}"
+        y, mo, d = m.groups()
+        return f"{int(y):04d}/{int(mo):02d}/{int(d):02d}"
+
+    # DD/MM/YYYY 或 DD.MM.YYYY（啟發式：a>12 必為日；b>12 必為日；都 ≤12 預設 DD/MM）
+    m = re.match(r"^(\d{1,2})[./\-](\d{1,2})[./\-](\d{4})$", s_nospace)
+    if m:
+        a, b, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if a > 12 and b <= 12:
+            d, mo = a, b
+        elif b > 12 and a <= 12:
+            d, mo = b, a
+        else:
+            d, mo = a, b  # 中文環境預設日/月
+        return f"{y:04d}/{mo:02d}/{d:02d}"
+
+    # 中文 M月D日（無年份）
+    m = re.match(r"^(\d{1,2})月(\d{1,2})日?$", s_nospace)
+    if m:
+        mo, d = int(m.group(1)), int(m.group(2))
+        return f"{datetime.now(TAIWAN_TZ).year:04d}/{mo:02d}/{d:02d}"
+
+    # M/D 或 M.D（無年份）
+    m = re.match(r"^(\d{1,2})[./\-](\d{1,2})$", s_nospace)
+    if m:
+        mo, d = int(m.group(1)), int(m.group(2))
+        return f"{datetime.now(TAIWAN_TZ).year:04d}/{mo:02d}/{d:02d}"
+
     return s
 
 
