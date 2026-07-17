@@ -20,7 +20,7 @@ def _get_engine():
     """懶加載 RapidOCR 引擎，回傳實例。"""
     global _ENGINE
     if _ENGINE is None:
-        from rapidocr_onnxruntime import RapidOCR
+        from rapidocr import RapidOCR
         _ENGINE = RapidOCR()
     return _ENGINE
 
@@ -69,10 +69,14 @@ def _detect_and_crop_card(arr):
 
 
 # ---------------------------------------------------------------------------
-# OCR（RapidOCR）
+# OCR（RapidOCR v2.x/v3.x）
 # ---------------------------------------------------------------------------
 def ocr_image_bytes(data: bytes) -> str:
-    """對圖片 bytes 做 OCR（RapidOCR），回傳辨識文字（每行用換行分開）。"""
+    """對圖片 bytes 做 OCR（RapidOCR），回傳辨識文字（每行用換行分開）。
+
+    RapidOCR v2.x+ API：engine(arr) 回傳 RapidOCROutput 物件，
+    其 .txts 屬性為 tuple of str。
+    """
     from io import BytesIO
     from PIL import Image
     import numpy as np
@@ -90,20 +94,12 @@ def ocr_image_bytes(data: bytes) -> str:
         arr = cropped
 
     engine = _get_engine()
-    result, _ = engine(arr)  # RapidOCR 回 (list, elapse)
+    result = engine(arr)  # v2.x+ 回 RapidOCROutput
 
-    if not result:
+    if not result or not getattr(result, "txts", None):
         return ""
 
-    lines = []
-    for item in result:
-        # RapidOCR 格式：[bbox, text, confidence]
-        if isinstance(item, (list, tuple)) and len(item) >= 2:
-            text = str(item[1]).strip()
-            if text:
-                lines.append(text)
-
-    return "\n".join(lines)
+    return "\n".join(str(t) for t in result.txts if t)
 
 
 # ---------------------------------------------------------------------------

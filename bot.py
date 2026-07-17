@@ -25,7 +25,6 @@ from telegram.ext import (
 )
 from fill import fill_booking, output_filename, verify_booking_names, verify_guests_age
 from parse_text import parse_booking_text, looks_like_booking
-import ocr
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,7 +46,6 @@ class BookingTextFilter(filters.BaseFilter):
         msg = update.effective_message
         if not msg:
             return False
-        # 只要帶有 photo 或 document，就不是文字訂單
         if msg.photo or msg.document:
             return False
         if not msg.text:
@@ -76,131 +74,36 @@ async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("\n".join(all_warns))
     except Exception:
         logger.exception("文字產檔失敗")
-    # 暫存原始文字，讓使用者之後單獨傳證件照片也能核對
-    context.user_data["last_text"] = update.message.text
     return
 
 
-async def _download_photo_source(update):
-    """從 photo 或 image document 取圖片 bytes；不支援則回 (None, reason)。"""
-    msg = update.effective_message
-    doc = msg.document if msg else None
-    mime = getattr(doc, "mime_type", None)
-    fname = getattr(doc, "file_name", None) or ""
-    ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
-    logger.info("_download_photo_source: msg_id=%s has_photo=%s has_doc=%s mime=%s fname=%s ext=%s",
-                msg.message_id if msg else None,
-                bool(msg.photo) if msg else None,
-                bool(doc) if msg else None,
-                mime, fname, ext)
-    src = None
-    if msg.photo:
-        src = msg.photo[-1]
-    elif doc is not None:
-        # 任意 document 都嘗試下載（含以檔案方式傳送的圖片）；
-        # 非圖片會在 OCR 階段由 PIL 拋錯並給使用者可見提示，避免靜默無反應
-        src = doc
-    if src is None:
-        return None, "not_image"
-    try:
-        # PTB 22.x：get_file() 與 download_as_bytearray() 都是 coroutine，須分兩次 await
-        file = await src.get_file()
-        data = await file.download_as_bytearray()
-    except Exception:
-        logger.exception("下載圖片失敗")
-        return None, "download_fail"
-    if not data:
-        return None, "empty"
-    return bytes(data), None
-
-
-async def _safe_reply(update, text):
-    """安全回覆：reply_text 失敗時只記 log，不讓異常傳播導致靜默無反應。"""
-    try:
-        await update.effective_message.reply_text(text)
-    except Exception:
-        logger.exception("reply_text 失敗")
-
-
-async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """收到證件照片：OCR 識別，並與訂房文字核對（或僅回顯識別結果）。"""
-    logger.info("photo_handler triggered: msg_id=%s", update.effective_message.message_id if update.effective_message else None)
-
-    # 立即回覆「處理中」，讓使用者知道 Bot 收到了（避免長時間靜默）
-    await _safe_reply(update, "📸 收到照片，正在辨識中，請稍候 10~30 秒…")
-
-    data, err = await _download_photo_source(update)
-    if err == "not_image":
-        await _safe_reply(update,
-            "【注意】我看得懂「訂房文字」或直接傳送的「證件照片」。\n"
-            "請直接傳送照片（不要用「檔案」方式傳送）；若以檔案傳送，請確認是圖片格式。")
-        return
-    if err in ("download_fail", "empty"):
-        await _safe_reply(update,
-            "【注意】證件照片下載失敗，請重試一次，或改為手動輸入。")
-        return
-
-    # OCR 是同步阻塞呼叫，用 to_thread 放到執行緒池避免卡住事件循環
-    try:
-        raw_text = await asyncio.to_thread(ocr.ocr_image_bytes, data)
-    except Exception:
-        logger.exception("OCR 失敗")
-        await _safe_reply(update,
-            "【注意】證件照片辨識失敗，請確認照片清晰或改為手動輸入。")
-        return
-
-    fields = ocr.extract_fields(raw_text)
-    logger.info("OCR 識別欄位：%s | 原文長度 %d", fields, len(raw_text or ""))
-    logger.info("OCR 原文前 500 字：%s", (raw_text or "")[:500])
-
-    # 文字來源：圖片 caption 優先，否則用上一次貼的訂房文字
-    caption = update.message.caption or ""
-    booking_text = caption if caption else context.user_data.get("last_text", "")
-
-    if booking_text and looks_like_booking(booking_text):
-        booking = parse_booking_text(booking_text)
-        # 只比對證件 OCR 結果與填寫內容，不產 Excel
-        warns = ocr.verify_ocr_vs_booking(fields, booking)
-        if warns:
-            await _safe_reply(update, "\n".join(warns))
-        else:
-            await _safe_reply(update, "✅ 證件資料與填寫內容一致。")
-    else:
-        await _safe_reply(update, ocr.format_fields(fields))
-
-
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """任何未被 text/photo 處理的訊息，給一個指引，避免靜默無反應。"""
+    """任何未被 text_entry 處理的訊息，給一個指引。"""
     msg = update.effective_message
-    logger.info("fallback_handler: msg_id=%s content_type=%s has_photo=%s has_doc=%s",
+    logger.info("fallback_handler: msg_id=%s has_photo=%s has_doc=%s text_len=%s",
                 msg.message_id if msg else None,
-                msg.chat.type if msg else None,
                 bool(msg.photo) if msg else None,
-                bool(msg.document) if msg else None)
-    await _safe_reply(update,
-        "我看得懂兩種訊息：\n"
-        "1. 直接貼上訂房文字（入住/退房/飯店/房型/件數…）\n"
-        "2. 傳送證件照片（請用「照片」方式，不要用「檔案」）")
+                bool(msg.document) if msg else None,
+                len(msg.text or "") if msg and msg.text else 0)
+    await update.effective_message.reply_text(
+        "我只看得懂「訂房文字」格式喔！\n"
+        "請直接貼上訂房資訊（入住/退房/飯店/房型/件數/入住者…）")
 
 
 def _build_application(token):
-    """建立 Application：僅保留「貼文字自動產檔」模式（模式 A）。
-    不註冊任何指令，Telegram 不會顯示指令選單按鈕。"""
+    """建立 Application：僅保留「貼文字自動產檔」模式（模式 A）。"""
     app = Application.builder().token(token).build()
     text_filter = BookingTextFilter()
-    photo_filter = filters.PHOTO | filters.Document.ALL
-    # 關鍵：photo_handler 必須排在 text_entry 前面，確保照片/文件優先處理
-    app.add_handler(MessageHandler(photo_filter, photo_handler))
     app.add_handler(MessageHandler(text_filter, text_entry))
     app.add_handler(MessageHandler(
-        filters.ChatType.PRIVATE & ~text_filter & ~photo_filter,
+        filters.ChatType.PRIVATE & ~text_filter,
         fallback_handler))
     return app
 
 
 async def _run_webhook_server(app, base):
     """自建 aiohttp 伺服器：同時處理 Telegram webhook 與健康檢查。
-    啟動順序：HTTP 伺服器 → PTB 初始化 → webhook 設定 → OCR 預熱。
+    啟動順序：HTTP 伺服器 → PTB 初始化 → webhook 設定。
     確保健康檢查端點最先可用，避免 Render 判部署失敗。"""
     port = int(os.environ.get("PORT", 10000))
     url = base.rstrip("/") + WEBHOOK_PATH
@@ -241,12 +144,7 @@ async def _run_webhook_server(app, base):
         return web.Response(text="ok")
 
     async def handle_health(request):
-        status = {"status": "ok", "ptb": _ptb_ready}
-        try:
-            status["ocr"] = "ready" if ocr.paddleocr_ready() else "not_ready"
-        except Exception as e:  # noqa
-            status["ocr"] = f"error:{e}"
-        return web.json_response(status)
+        return web.json_response({"status": "ok", "ptb": _ptb_ready})
 
     aio_app = web.Application()
     aio_app.router.add_post(WEBHOOK_PATH, handle_webhook)
@@ -269,11 +167,6 @@ async def _run_webhook_server(app, base):
         logger.info("PTB 初始化完成，webhook 已設定：%s", url)
     except Exception:
         logger.exception("PTB 初始化或 webhook 設定失敗")
-        # 不 raise：HTTP 伺服器仍可回應健康檢查，避免 Render 判整個服務掛掉
-
-    # --- OCR 引擎預熱已移除 ---
-    # PaddleOCR 載入需要 200MB+ 記憶體，在 512MB Starter 方案上預熱會導致 OOM。
-    # 改為收到照片時才懶載入（第一次 OCR 會慢 10~30 秒，但有立即回覆告知使用者）。
 
     try:
         while True:
