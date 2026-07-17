@@ -22,7 +22,10 @@
 輸出結構與 fill_booking() 完全相容。
 """
 import re
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# 台灣時區（GMT+8）：Render 伺服器為 UTC，無年份日期補年必須用台灣時間
+TAIWAN_TZ = timezone(timedelta(hours=8))
 
 # 標準欄位（對應 fill_booking 的 booking dict key）
 STANDARD = [
@@ -223,12 +226,12 @@ def _norm_date(value):
     m = re.match(r"^(\d{1,2})月(\d{1,2})日?$", s_nospace)
     if m:
         mo, d = int(m.group(1)), int(m.group(2))
-        return f"{datetime.now().year:04d}/{mo:02d}/{d:02d}"
+        return f"{datetime.now(TAIWAN_TZ).year:04d}/{mo:02d}/{d:02d}"
     # M/D 或 M.D（無年份）→ 補今年
     m = re.match(r"^(\d{1,2})[./\-](\d{1,2})$", s_nospace)
     if m:
         mo, d = int(m.group(1)), int(m.group(2))
-        return f"{datetime.now().year:04d}/{mo:02d}/{d:02d}"
+        return f"{datetime.now(TAIWAN_TZ).year:04d}/{mo:02d}/{d:02d}"
     return s  # 無法識別就原樣保留
 
 
