@@ -359,6 +359,87 @@ def _write_labeled(ws, coord, value):
         ws[coord] = value
 
 
+# ---------------------------------------------------------------------------
+# 房型勾選：匹配 booking 房型 → 在模板對應儲存格打 ✓
+# ---------------------------------------------------------------------------
+def _match_room_type(room_types: list, room_type_str: str):
+    """在飯店房型列表中尋找匹配項，回傳儲存格座標或 None。
+    matching priority: exact code → code group → exact Chinese → weighted ngram
+    """
+    if not room_type_str:
+        return None
+    s = (room_type_str or "").strip()
+    su = s.upper()
+    s_clean = re.sub(r"[（()].*", "", s).strip()
+
+    # Pass 1: exact matches (code / name)
+    for cell, code, cn in room_types:
+        if su == code.upper():
+            return cell
+        for c in code.split("/"):
+            if su == c.strip().upper():
+                return cell
+        if s_clean == cn:
+            return cell
+
+    # Pass 2: weighted scoring (core match + substring + ngram)
+    sc = _core(s_clean)
+    best_cell, best_score, best_ngram_hits, best_len = None, 0, 0, 9999
+    for cell, code, cn in room_types:
+        score = 0
+        # Core match (stripped of generic terms like 套房/大床/雙床)
+        cnc = _core(cn)
+        if sc and cnc:
+            if sc in cnc or cnc in sc:
+                score += 50
+        # Substring containment
+        if s_clean in cn or cn in s_clean:
+            score += 100
+        # N-gram intersection: longer shared substrings → higher weight
+        ngram_hits = 0
+        for size in (4, 3, 2):
+            cn_set = {cn[i:i+size] for i in range(len(cn)-size+1)}
+            s_set = {s_clean[i:i+size] for i in range(len(s_clean)-size+1)}
+            hits = len(cn_set & s_set)
+            score += hits * size
+            ngram_hits += hits
+        # tiebreaker: 同分 → ngram 命中多者優先 → 名字短者優先
+        if score == best_score:
+            if ngram_hits > best_ngram_hits:
+                best_cell, best_score, best_ngram_hits = cell, score, ngram_hits
+            elif ngram_hits == best_ngram_hits and len(cn) < best_len:
+                best_cell, best_score, best_ngram_hits, best_len = cell, score, ngram_hits, len(cn)
+        elif score > best_score:
+            best_cell, best_score, best_ngram_hits, best_len = cell, score, ngram_hits, len(cn)
+
+    return best_cell if best_score > 0 else None
+
+
+def _check_room_cell(ws, cell_coord: str):
+    """在房型格填入 ✓。若該格原本含 (  ) 格式 → 取代為 (✓)；
+    否則直接寫入 ✓ 在原值之後（保留房型名稱文字）。"""
+    existing = ws[cell_coord].value or ""
+    txt = str(existing)
+    # 範本常見格式：(  ) 房型名 → 改為 (✓) 房型名
+    replaced = re.sub(r"\(\s*\)", "(✓)", txt, count=1)
+    if replaced != txt:
+        ws[cell_coord] = replaced
+    else:
+        # 無 (  ) 格式就直接接 ✓
+        ws[cell_coord] = (txt.strip() + " ✓").strip()
+
+
+def _check_billing_cell(ws, cell_coord: str):
+    """在『收費 Billing』勾選格填入 V：將 (    ) 改為 ( V )。"""
+    existing = ws[cell_coord].value or ""
+    txt = str(existing)
+    replaced = re.sub(r"\(\s*\)", "( V )", txt, count=1)
+    if replaced != txt:
+        ws[cell_coord] = replaced
+    else:
+        ws[cell_coord] = (txt.strip() + " V").strip()
+
+
 def fill_booking(booking: dict) -> BytesIO:
     """
     booking 結構：
@@ -399,6 +480,17 @@ def fill_booking(booking: dict) -> BytesIO:
     # 其他飯店此格為空白填空格，直接寫入數值。
     _write_labeled(mws, mc["rooms"], booking.get("件數", ""))
     _write_labeled(mws, mc["pax"], len(guests))
+
+    # ---- 房型打勾：匹配 booking 房型 → 在對應的 (  ) 格填入 ✓ ----
+    room_type_str = (booking.get("房型", "") or "").strip()
+    if room_type_str and cfg.get("room_types"):
+        cell = _match_room_type(cfg["room_types"], room_type_str)
+        if cell:
+            _check_room_cell(mws, cell)
+
+    # ---- 收費 Billing 自動打 V：只要產檔就勾選 ----
+    if "billing" in mc:
+        _check_billing_cell(mws, mc["billing"])
 
     # 填表日期（右下角 Date: 後面的底線格；只填日期值，保留模板藍色字體格式）
     if "date" in mc:

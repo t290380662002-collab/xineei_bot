@@ -34,6 +34,7 @@ HOTELS = {
             "rooms": "O21",      # 房數 No. of Rooms（填空格 O21）
             "remark": "L14",     # 特別要求 Special request（L14:O14 即填空格）
             "date": "N29",       # 填表日期 Date（N29:O29 為 Date: 右側底線格）
+            "billing": "D13",    # 收費 Billing 勾選格 (    ) → ( V )
         },
         "guest_first_row": 9,
         "guest_cols": {
@@ -86,6 +87,7 @@ HOTELS = {
             "rooms": "O21",      # 房數（填空格 O21）
             "remark": "L14",     # 特別要求（L14:O14 即填空格）
             "date": "N30",       # 填表日期 Date（N30:O30 為 Date: 右側底線格）
+            "billing": "D13",    # 收費 Billing 勾選格 (    ) → ( V )
         },
         "guest_first_row": 3,
         "guest_cols": {
@@ -123,6 +125,7 @@ HOTELS = {
             "rooms": "O21",      # 房數（填空格 O21）
             "remark": "L14",     # 特別要求（L14:O14 即填空格）
             "date": "N30",       # 填表日期 Date（N30:O30 為 Date: 右側底線格）
+            "billing": "D13",    # 收費 Billing 勾選格 (    ) → ( V )
         },
         "guest_first_row": 3,
         "guest_cols": {
@@ -174,6 +177,7 @@ HOTELS = {
             "rooms": "O21",      # 房數（填空格 O21）
             "remark": "L14",     # 特別要求（L14:O14 即填空格）
             "date": "N31",       # 填表日期 Date（N31:O31 為 Date: 右側底線格）
+            "billing": "D13",    # 收費 Billing 勾選格 (    ) → ( V )
         },
         "guest_first_row": 2,
         "guest_cols": {
@@ -230,6 +234,7 @@ HOTELS = {
             "rooms": "O21",      # 房數 No.of Rooms（填空格 O21）
             "remark": "L14",     # 特別要求 Special request（L14:O14 含標籤，寫入時保留標籤）
             "date": "N30",       # 填表日期 Date（N30:O30 為 Date: 右側底線格）
+            "billing": "D13",    # 收費 Billing 勾選格 (    ) → ( V )
         },
         "guest_first_row": 3,
         "guest_cols": {
@@ -270,6 +275,7 @@ HOTELS = {
             "rooms": "M21",      # 房數 No.of Rooms (間):（M21:N21 標籤與填空合一）
             "remark": "L14",     # 特別要求 Special request（L14:O14 含標籤，寫入時保留標籤）
             "date": "N28",       # 填表日期 Date（N28:O28 為 Date: 右側底線格，標籤在 K28）
+            "billing": "D13",    # 收費 Billing 勾選格 (    ) → ( V )
         },
         "guest_first_row": 0,
         "guest_cols": {},
