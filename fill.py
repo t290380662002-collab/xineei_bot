@@ -557,10 +557,30 @@ def fill_booking(booking: dict) -> BytesIO:
 
 
 def output_filename(booking: dict) -> str:
+    """產出檔名：{入住日期}-{退房日期}_{飯店}_{姓名}.xlsx
+    姓名會轉繁體（港澳用字，如 李彦超→李彥超）。
+    若缺日期則回退為「訂房」前綴，避免多出分隔符。"""
     hotel = resolve_hotel(booking.get("飯店", "")) or "訂房"
     g0 = (booking.get("guests") or [{}])[0]
     name = g0.get("cn_name") or g0.get("en_name") or ""
-    return f"訂房_{hotel}_{name}.xlsx"
+    # 姓名轉繁體
+    try:
+        from zhconv import convert as _to_trad
+        if name:
+            name = _to_trad(name, "zh-tw")
+    except Exception:
+        pass
+    ci = _norm_date(booking.get("入住", "")).replace("/", "-")
+    co = _norm_date(booking.get("退房", "")).replace("/", "-")
+    if ci and co:
+        prefix = f"{ci}-{co}"
+    elif ci:
+        prefix = ci
+    elif co:
+        prefix = co
+    else:
+        prefix = "訂房"
+    return f"{prefix}_{hotel}_{name}.xlsx"
 
 
 # ---------------------------------------------------------------------------
