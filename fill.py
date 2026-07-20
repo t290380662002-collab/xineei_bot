@@ -93,11 +93,19 @@ def _fill_summary_sheet(wb, booking, guests, primary):
 
     sur, fir = split_en_name(primary.get("en_name", ""), primary.get("cn_name", ""))
     en_full = ",".join(x for x in (sur, fir) if x)
+    cn_name = primary.get("cn_name", "")
+    # 中文姓名在訂單摘要一律顯示繁體
+    try:
+        from zhconv import convert as _to_trad
+        if cn_name:
+            cn_name = _to_trad(cn_name, "zh-tw")
+    except Exception:
+        pass
     row = [
         booking.get("代理", ""),
         booking.get("訂單編號", ""),
         en_full,
-        primary.get("cn_name", ""),
+        cn_name,
         _norm_date(booking.get("入住", "")),
         _norm_date(booking.get("退房", "")),
     ]
