@@ -556,9 +556,21 @@ def fill_booking(booking: dict) -> BytesIO:
     return bio
 
 
+def _short_date(raw: str) -> str:
+    """把日期轉成 月.日 格式（去掉年份），如 2026/07/20 → 07.20。
+    解析失敗或非預期長度則回傳空字串。"""
+    d = _norm_date(raw)
+    if not d:
+        return ""
+    parts = d.split("/")
+    if len(parts) == 3:
+        return f"{parts[1]}.{parts[2]}"
+    return ""
+
+
 def output_filename(booking: dict) -> str:
-    """產出檔名：{入住日期}-{退房日期}_{飯店}_{姓名}.xlsx
-    姓名會轉繁體（港澳用字，如 李彦超→李彥超）。
+    """產出檔名：{入住月.日}-{退房月.日}_{飯店}_{姓名}.xlsx
+    年份不顯示；姓名會轉繁體（港澳用字，如 李彦超→李彥超）。
     若缺日期則回退為「訂房」前綴，避免多出分隔符。"""
     hotel = resolve_hotel(booking.get("飯店", "")) or "訂房"
     g0 = (booking.get("guests") or [{}])[0]
@@ -570,8 +582,8 @@ def output_filename(booking: dict) -> str:
             name = _to_trad(name, "zh-tw")
     except Exception:
         pass
-    ci = _norm_date(booking.get("入住", "")).replace("/", "-")
-    co = _norm_date(booking.get("退房", "")).replace("/", "-")
+    ci = _short_date(booking.get("入住", ""))
+    co = _short_date(booking.get("退房", ""))
     if ci and co:
         prefix = f"{ci}-{co}"
     elif ci:
