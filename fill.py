@@ -587,9 +587,9 @@ def _short_date(raw: str) -> str:
 
 
 def output_filename(booking: dict) -> str:
-    """產出檔名：{入住月.日}-{退房月.日}_{飯店}_{姓名}.xlsx
-    年份不顯示；姓名會轉繁體（港澳用字，如 李彦超→李彥超）。
-    若缺日期則回退為「訂房」前綴，避免多出分隔符。"""
+    """產出檔名：{入住月.日}-{退房月.日}-{飯店}-{代理}-{姓名}.xlsx
+    年份不顯示；分隔符統一用 -；姓名會轉繁體（港澳用字，如 李彦超→李彥超）。
+    若缺日期則回退為「訂房」前綴；代理缺省時省略該段。"""
     hotel = resolve_hotel(booking.get("飯店", "")) or "訂房"
     g0 = (booking.get("guests") or [{}])[0]
     name = g0.get("cn_name") or g0.get("en_name") or ""
@@ -610,7 +610,12 @@ def output_filename(booking: dict) -> str:
         prefix = co
     else:
         prefix = "訂房"
-    return f"{prefix}_{hotel}_{name}.xlsx"
+    parts = [prefix, hotel]
+    agent = (booking.get("代理", "") or "").strip()
+    if agent:
+        parts.append(agent)
+    parts.append(name)
+    return "-".join(parts) + ".xlsx"
 
 
 # ---------------------------------------------------------------------------
