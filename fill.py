@@ -5,7 +5,7 @@
 """
 import re
 import openpyxl
-from openpyxl.styles import Alignment
+from openpyxl.styles import Alignment, Border, Side
 from io import BytesIO
 from datetime import datetime, timezone, timedelta
 from config import HOTELS, TEMPLATES_DIR, resolve_hotel
@@ -53,8 +53,14 @@ def _core(s):
 # （與原本的客人清單 Sheet1 互不干擾）
 # ---------------------------------------------------------------------------
 SUMMARY_SHEET = "訂單摘要"
-SUMMARY_HEADERS = ["代理", "訂單編號", "英文姓名", "中文姓名", "入住日期", "退房日期", "晚數"]
+SUMMARY_HEADERS = ["代理", "訂單編號", "英文姓名", "中文姓名", "入住日期", "退房日期"]
 _SUMMARY_ALIGN = Alignment(horizontal="center", vertical="center")
+_SUMMARY_BORDER = Border(
+    left=Side(style="thin"),
+    right=Side(style="thin"),
+    top=Side(style="thin"),
+    bottom=Side(style="thin"),
+)
 
 
 def _nights(checkin, checkout):
@@ -94,11 +100,15 @@ def _fill_summary_sheet(wb, booking, guests, primary):
         primary.get("cn_name", ""),
         _norm_date(booking.get("入住", "")),
         _norm_date(booking.get("退房", "")),
-        _nights(booking.get("入住", ""), booking.get("退房", "")),
     ]
     for c, v in enumerate(row, start=1):
         cell = ws.cell(row=2, column=c, value=v)
         cell.alignment = _SUMMARY_ALIGN
+
+    # 所有標題與資料格加上細框線
+    for r in range(1, 3):
+        for c in range(1, len(SUMMARY_HEADERS) + 1):
+            ws.cell(row=r, column=c).border = _SUMMARY_BORDER
 
     # 自動調整欄寬：依標題與資料中最寬者；中文約 2 寬、英文/數字約 1 寬，加 2 安全邊距。
     for c, h in enumerate(SUMMARY_HEADERS, start=1):
