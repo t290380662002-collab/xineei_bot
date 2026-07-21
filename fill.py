@@ -499,12 +499,14 @@ def fill_booking(booking: dict) -> BytesIO:
     _write_labeled(mws, mc["rooms"], booking.get("件數", ""))
     _write_labeled(mws, mc["pax"], len(guests))
 
-    # ---- 房型打勾：匹配 booking 房型 → 在對應的 (  ) 格填入 ✓ ----
-    room_type_str = (booking.get("房型", "") or "").strip()
-    if room_type_str and cfg.get("room_types"):
-        cell = _match_room_type(cfg["room_types"], room_type_str)
-        if cell:
-            _check_room_cell(mws, cell)
+    # ---- 房型打勾：已關閉 ----
+    # 用戶要求：不要自動在 RM TYPE 區塊打 ✓，全部留空讓人員手動勾選。
+    # 若日後要重新啟用，取消下面這段註解即可：
+    # room_type_str = (booking.get("房型", "") or "").strip()
+    # if room_type_str and cfg.get("room_types"):
+    #     cell = _match_room_type(cfg["room_types"], room_type_str)
+    #     if cell:
+    #         _check_room_cell(mws, cell)
 
     # ---- 收費 Billing 自動打 V：只要產檔就勾選 ----
     if "billing" in mc:
