@@ -82,6 +82,10 @@ class QueryFilter(filters.BaseFilter):
             return False
         t = msg.text.strip()
         return t == "/查" or t.startswith("/查@")
+
+
+class BookingTextFilter(filters.BaseFilter):
+    """判斷訊息是否為訂房文字。"""
     def filter(self, update):
         msg = update.effective_message
         if not msg or not msg.text:
