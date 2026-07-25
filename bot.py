@@ -20,7 +20,7 @@ from parse_text import parse_booking_text, looks_like_booking
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "2026-07-25e"
+VERSION = "2026-07-25f"
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "xinwea-booking-2026")
@@ -163,21 +163,29 @@ async def _run_webhook_server(app, base):
     _ptb_ready = False
 
     async def handle_webhook(request):
-        if WEBHOOK_SECRET and \
-           request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
-            return web.Response(status=403, text="forbidden")
-        if not _ptb_ready:
-            return web.Response(status=503, text="not ready")
         try:
-            data = await request.json()
-        except Exception:
-            return web.Response(status=400, text="bad json")
-        update = Update.de_json(data, app.bot)
-        try:
-            await app.process_update(update)
-        except Exception:
-            logger.exception("process_update 失敗")
-        return web.Response(text="ok")
+            if WEBHOOK_SECRET and \
+               request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
+                return web.Response(status=403, text="forbidden")
+            if not _ptb_ready:
+                return web.Response(status=503, text="not ready")
+            try:
+                data = await request.json()
+            except Exception:
+                return web.Response(status=400, text="bad json")
+            update = Update.de_json(data, app.bot)
+            try:
+                await app.process_update(update)
+            except Exception:
+                logger.exception("process_update 失敗")
+            return web.Response(text="ok")
+        except Exception as e:
+            logger.exception("webhook 頂層異常")
+            try:
+                return web.json_response(
+                    {"error": str(e), "type": type(e).__name__}, status=500)
+            except Exception:
+                return web.Response(status=500, text=str(e))
 
     async def handle_health(request):
         return web.json_response(
