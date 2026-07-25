@@ -20,7 +20,7 @@ from parse_text import parse_booking_text, looks_like_booking
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "2026-07-25d"
+VERSION = "2026-07-25e"
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "xinwea-booking-2026")
@@ -108,6 +108,10 @@ async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def junket_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """「查」→ 顯示目前賭廳並提供切換按鈕。"""
+    text = (update.message.text or "").strip()
+    # 硬防護：只有 /查 或 /查@bot 才處理，絕不對訂房文字彈出賭廳選單
+    if text != "/查" and not text.startswith("/查@"):
+        return
     chat_id = str(update.effective_chat.id)
     current = load_junket_settings().get(chat_id, "信威")
     await update.message.reply_text(
@@ -144,10 +148,10 @@ def _build_application(token):
     app = Application.builder().token(token).build()
     # 點選賭廳切換按鈕
     app.add_handler(CallbackQueryHandler(junket_switch, pattern="^switch:"))
+    # 貼訂房文字 → 產檔（優先於 /查，確保訂房文字絕不會被誤判為賭廳指令）
+    app.add_handler(MessageHandler(BookingTextFilter(), text_entry))
     # 「/查」→ 查詢/切換賭廳
     app.add_handler(MessageHandler(QueryFilter(), junket_query))
-    # 貼訂房文字 → 產檔
-    app.add_handler(MessageHandler(BookingTextFilter(), text_entry))
     # 其餘
     app.add_handler(MessageHandler(filters.ALL, fallback_handler))
     return app
