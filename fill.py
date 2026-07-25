@@ -20,6 +20,12 @@ _JUNKET_CANONICAL = {v: k for k, vs in {
     "博樂": ["博樂", "博乐", "伯樂", "博樂有限公司", "博乐有限公司", "伯樂有限公司"],
 }.items() for v in vs}
 
+# 寫入模板的顯示名（不對稱：信威帶「有限公司」，博樂只寫簡稱）。
+_JUNKET_DISPLAY = {
+    "信威": "信威有限公司",
+    "博樂": "博樂",
+}
+
 # 簡體/繁體 與常見異體字正規化（讓使用者打的簡稱對到模板正式名）
 _CHAR_MAP = {
     "槟": "檳", "双": "雙", "牀": "床", "烟": "煙",
@@ -521,10 +527,12 @@ def fill_booking(booking: dict) -> BytesIO:
     # ---- 賭廳名 Junket Name 與 JK internal AC no. 戶口：預設信威，可選博樂 ----
     if "junket" in mc:
         junket = (booking.get("junket", "信威") or "信威").strip()
-        # 用戶要求：只寫簡稱（信威 / 博樂），不要「有限公司」。
-        junket_name = _JUNKET_CANONICAL.get(junket, junket)
+        # 正規化為簡稱（信威 / 博樂），再取顯示名。
+        # 不對稱顯示：信威 → 信威有限公司；博樂 → 博樂（不帶有限公司）。
+        canonical = _JUNKET_CANONICAL.get(junket, junket)
+        junket_name = _JUNKET_DISPLAY.get(canonical, canonical)
         mws[mc["junket"]] = junket_name
-        # JK internal AC no. 戶口 右側填空格也同步賭廳簡稱
+        # JK internal AC no. 戶口 右側填空格也同步賭廳顯示名
         if "junket_account" in mc:
             mws[mc["junket_account"]] = junket_name
 
