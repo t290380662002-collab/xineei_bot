@@ -124,7 +124,7 @@ async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("fallback: msg_id=%s", msg.message_id if msg else None)
     await msg.reply_text(
         "請直接貼上訂房資訊（入住/退房/飯店/房型/件數/入住者…）\n"
-        "輸入「查」可查詢/切換賭廳。")
+        "輸入「/查」可查詢/切換賭廳。")
 
 
 def _build_application(token):
@@ -135,7 +135,7 @@ def _build_application(token):
     app.add_handler(MessageHandler(BookingTextFilter(), text_entry))
     # 「查」→ 查詢/切換賭廳
     app.add_handler(MessageHandler(
-        filters.TEXT & filters.Regex(r"^(查|/junket)$"), junket_query))
+        filters.TEXT & filters.Regex(r"^/查$"), junket_query))
     # 其餘
     app.add_handler(MessageHandler(filters.ALL, fallback_handler))
     return app
