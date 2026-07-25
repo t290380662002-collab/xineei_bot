@@ -16,12 +16,13 @@
 """
 import os
 import asyncio
+import json
 import logging
 from aiohttp import web
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     Application, MessageHandler, ContextTypes,
-    CallbackQueryHandler, filters,
+    ChatMemberHandler, filters,
 )
 from fill import fill_booking, output_filename, verify_booking_names, verify_guests_age
 from parse_text import parse_booking_text, looks_like_booking
@@ -31,6 +32,58 @@ logger = logging.getLogger(__name__)
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "xinwea-booking-2026")
+
+# 每個 chat（群/私聊）固定一次的賭廳設定，寫入 JSON 以便重啟後仍記住。
+JUNKET_SETTINGS_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "junket_settings.json")
+
+
+def load_junket_settings() -> dict:
+    try:
+        with open(JUNKET_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_junket_settings(settings: dict):
+    try:
+        with open(JUNKET_SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+    except Exception:
+        logger.warning("無法寫入 junket 設定檔", exc_info=True)
+
+
+# 賭廳簡稱關鍵字：用戶直接回覆這些文字之一即完成設定（不彈按鈕）。
+_JUNKET_KEYWORDS = {
+    "信威", "信威有限公司",
+    "博樂", "博乐", "博樂有限公司", "博乐有限公司",
+    "伯樂", "伯乐", "伯樂有限公司", "伯乐有限公司",
+}
+# 所有輸入別名統一規範為繁體簡稱（存進設定檔、檔名與範本）。
+_JUNKET_CANON = {
+    "信威": "信威", "信威有限公司": "信威",
+    "博樂": "博樂", "博乐": "博樂", "博樂有限公司": "博樂", "博乐有限公司": "博樂",
+    "伯樂": "博樂", "伯乐": "博樂", "伯樂有限公司": "博樂", "伯乐有限公司": "博樂",
+}
+
+
+async def _produce_and_reply(target, booking: dict):
+    """產出 Excel 並回傳（target 為 Message 物件）。"""
+    try:
+        bio = fill_booking(booking)
+        fn = output_filename(booking)
+        await target.reply_document(
+            document=bio, filename=fn,
+            caption="✅ 訂房 Excel 請下載：")
+        name_ok, name_warns = verify_booking_names(booking)
+        age_ok, age_warns = verify_guests_age(booking)
+        all_warns = name_warns + age_warns
+        if all_warns:
+            await target.reply_text("\n".join(all_warns))
+    except Exception:
+        logger.exception("產檔失敗")
+        await target.reply_text("⚠️ 產檔失敗，請檢查訂房文字格式或稍後再試。")
 
 
 def _webhook_base_url():
@@ -53,67 +106,77 @@ class BookingTextFilter(filters.BaseFilter):
         return looks_like_booking(msg.text)
 
 
+class JunketTextFilter(filters.BaseFilter):
+    """判斷訊息是否為「賭廳設定指令」：整條訊息就是 信威/博樂 等關鍵字之一。
+    顯式排除照片/文件；只有純文字且整條相等才視為設定。"""
+
+    def filter(self, update):
+        msg = update.effective_message
+        if not msg or not msg.text:
+            return False
+        if msg.photo or msg.document:
+            return False
+        return msg.text.strip() in _JUNKET_KEYWORDS
+
+
 async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """直接貼上訂房文字 → 解析 → 詢問賭廳 → 產生 Excel 回傳。"""
+    """直接貼上訂房文字 → 解析 → 若本群尚未選定賭廳則詢問一次，
+    選定後固定，之後貼文字直接產檔。"""
     logger.info("text_entry: msg_id=%s text_len=%s",
                 update.message.message_id if update.message else None,
                 len(update.message.text or ""))
     booking = parse_booking_text(update.message.text)
-    # 先記住解析結果，等待用戶選擇賭廳後才產檔
-    context.user_data["pending_booking"] = booking
-    g0 = (booking.get("guests") or [{}])[0]
-    name = g0.get("cn_name") or g0.get("en_name") or ""
-    hotel = booking.get("飯店", "")
-    checkin = booking.get("入住", "")
-    checkout = booking.get("退房", "")
-    summary = f"飯店：{hotel}\n姓名：{name}\n入住：{checkin} 退房：{checkout}\n\n請選擇賭廳："
-    keyboard = [
-        [
-            InlineKeyboardButton("信威-澳門廳", callback_data="junket:信威"),
-            InlineKeyboardButton("博樂-澳門廳", callback_data="junket:博樂"),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    sent = await update.message.reply_text(summary, reply_markup=reply_markup)
-    context.user_data["pending_msg_id"] = sent.message_id
+    chat_id = update.effective_chat.id
+    settings = load_junket_settings()
+    key = str(chat_id)
+    if key in settings:
+        # 本群已固定賭廳 → 直接產檔，不再詢問
+        booking["junket"] = settings[key]
+        await _produce_and_reply(update.message, booking)
+        return
+    # 尚未設定：提示用戶直接回覆「信威」或「博樂」一次即可固定（不彈按鈕）
+    await update.message.reply_text(
+        "本群尚未設定賭廳。\n"
+        "請直接回覆「信威」或「博樂」（僅此一次，設定後固定），"
+        "之後貼訂房文字即可自動產檔。")
 
 
-async def junket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """用戶點選賭廳後，設定 junket 並產出 Excel。"""
-    query = update.callback_query
-    await query.answer()
-    data = query.data or ""
-    if not data.startswith("junket:"):
+async def junket_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """用戶直接回覆「信威」/「博樂」等文字 → 寫入本群設定（固定，僅一次）。"""
+    chat_id = update.effective_chat.id
+    key = str(chat_id)
+    settings = load_junket_settings()
+    if key in settings:
+        # 已固定，避免誤改（如需變更請重置設定檔）
+        await update.message.reply_text(
+            f"本群賭廳已固定為：{settings[key]}（設定後即固定，不會再變更）。")
         return
-    junket = data.split(":", 1)[1]
-    booking = context.user_data.get("pending_booking")
-    if not booking:
-        await query.edit_message_text("⚠️ 找不到待處理的訂房資料，請重新貼上訂房文字。")
+    t = (update.message.text or "").strip()
+    junket = _JUNKET_CANON.get(t, t)
+    settings[key] = junket          # 固定到本群
+    save_junket_settings(settings)
+    await update.message.reply_text(
+        f"✅ 已設定本群賭廳為：{junket}（僅此一次，之後貼訂房文字將自動套用）")
+
+
+async def chat_member_added(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """機器人被加入群組時，詢問一次賭廳（已設定過則不重問）。"""
+    member = update.my_chat_member
+    if not member:
         return
-    booking["junket"] = junket
-    # 移除鍵盤，顯示已選擇
-    await query.edit_message_reply_markup(reply_markup=None)
-    try:
-        bio = fill_booking(booking)
-        fn = output_filename(booking)
-        await query.message.reply_document(
-            document=bio,
-            filename=fn,
-            caption=f"✅ 已選擇賭廳：{junket}，訂房 Excel 請下載：",
-        )
-        # 中文 / 英文姓名拼音自動核對：不符時提示使用者確認
-        name_ok, name_warns = verify_booking_names(booking)
-        # 年齡檢查：未滿 21 歲提示
-        age_ok, age_warns = verify_guests_age(booking)
-        all_warns = name_warns + age_warns
-        if all_warns:
-            await query.message.reply_text("\n".join(all_warns))
-    except Exception:
-        logger.exception("產檔失敗")
-        await query.message.reply_text("⚠️ 產檔失敗，請檢查訂房文字格式或稍後再試。")
-    finally:
-        context.user_data.pop("pending_booking", None)
-        context.user_data.pop("pending_msg_id", None)
+    chat = update.effective_chat
+    if not chat or chat.type not in ("group", "supergroup"):
+        return
+    if member.new_chat_member.status != "member":
+        return
+    key = str(chat.id)
+    settings = load_junket_settings()
+    if key in settings:
+        return  # 已固定，不重問
+    await context.bot.send_message(
+        chat_id=chat.id,
+        text="歡迎使用訂房機器人！\n本群尚未設定賭廳，請直接回覆「信威」或「博樂」"
+             "（僅此一次，設定後固定）。")
 
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -125,18 +188,26 @@ async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 bool(msg.document) if msg else None,
                 len(msg.text or "") if msg and msg.text else 0)
     await update.effective_message.reply_text(
-        "我只看得懂「訂房文字」格式喔！\n"
-        "請直接貼上訂房資訊（入住/退房/飯店/房型/件數/入住者…）")
+        "我看不懂這則訊息喔！\n"
+        "· 貼上「訂房文字」格式（入住/退房/飯店/房型/件數/入住者…）即可產檔；\n"
+        "· 若本群尚未設定賭廳，請先回覆「信威」或「博樂」（僅一次）。")
 
 
 def _build_application(token):
-    """建立 Application：貼文字後先詢問賭廳，再產檔。"""
+    """建立 Application：每個群首次以文字回覆賭廳並固定，之後直接產檔。"""
     app = Application.builder().token(token).build()
     text_filter = BookingTextFilter()
-    app.add_handler(CallbackQueryHandler(junket_callback, pattern="^junket:"))
+    junket_filter = JunketTextFilter()
+    # 機器人被加入群組 → 提示回覆一次賭廳
+    app.add_handler(ChatMemberHandler(
+        chat_member_added, ChatMemberHandler.MY_CHAT_MEMBER))
+    # 用戶直接回覆「信威」/「博樂」→ 設定並固定（優先於訂房文字）
+    app.add_handler(MessageHandler(junket_filter, junket_text_handler))
+    # 貼訂房文字（已固定則直接產檔，否則提示先設定）
     app.add_handler(MessageHandler(text_filter, text_entry))
+    # 其餘訊息：指引
     app.add_handler(MessageHandler(
-        filters.ChatType.PRIVATE & ~text_filter,
+        filters.ALL & ~text_filter & ~junket_filter,
         fallback_handler))
     return app
 

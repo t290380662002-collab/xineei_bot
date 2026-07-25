@@ -14,6 +14,22 @@ from config import HOTELS, TEMPLATES_DIR, resolve_hotel
 # 填表日期必須用台灣時間，否則會慢一天。
 TAIWAN_TZ = timezone(timedelta(hours=8))
 
+# 賭廳簡稱 -> 範本顯示完整公司名（JK internal AC no. 戶口 右側欄位）
+_JUNKET_DISPLAY = {
+    "信威": "信威有限公司",
+    "信威有限公司": "信威有限公司",
+    "博樂": "博樂有限公司",
+    "博乐": "博樂有限公司",
+    "博乐有限公司": "博樂有限公司",
+    "博樂有限公司": "博樂有限公司",
+    "伯樂": "博樂有限公司",
+    "伯樂有限公司": "博樂有限公司",
+}
+_JUNKET_CANONICAL = {k: v for v, k in {
+    "信威": ["信威", "信威有限公司"],
+    "博樂": ["博樂", "博乐", "伯樂", "博樂有限公司", "博乐有限公司", "伯樂有限公司"],
+}.items() for k in v}
+
 # 簡體/繁體 與常見異體字正規化（讓使用者打的簡稱對到模板正式名）
 _CHAR_MAP = {
     "槟": "檳", "双": "雙", "牀": "床", "烟": "煙",
@@ -515,12 +531,9 @@ def fill_booking(booking: dict) -> BytesIO:
     # ---- 賭廳名 Junket Name：預設信威，可選博樂 ----
     if "junket" in mc:
         junket = (booking.get("junket", "信威") or "信威").strip()
-        # 檔名用簡稱，範本顯示完整「X-澳門廳」
-        if junket and "-澳門廳" not in junket and "澳門廳" not in junket:
-            junket_full = f"{junket}-澳門廳"
-        else:
-            junket_full = junket or "信威-澳門廳"
-        mws[mc["junket"]] = junket_full
+        # 範本顯示完整公司名（信威有限公司 / 博樂有限公司）
+        junket_display = _JUNKET_DISPLAY.get(junket, junket)
+        mws[mc["junket"]] = junket_display
 
     # 填表日期（右下角 Date: 後面的底線格；只填日期值，保留模板藍色字體格式）
     if "date" in mc:
@@ -624,6 +637,7 @@ def output_filename(booking: dict) -> str:
     else:
         prefix = "訂房"
     junket = (booking.get("junket", "信威") or "信威").strip()
+    junket = _JUNKET_CANONICAL.get(junket, junket)
     return f"{prefix}-{hotel}-{junket}-{name}.xlsx"
 
 
