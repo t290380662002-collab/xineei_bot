@@ -108,7 +108,7 @@ class BookingTextFilter(filters.BaseFilter):
 
 class JunketTextFilter(filters.BaseFilter):
     """判斷訊息是否為「賭廳設定指令」：整條訊息就是 信威/博樂 等關鍵字之一。
-    顯式排除照片/文件；只有純文字且整條相等才視為設定。"""
+    顯式排除照片/文件、多行文字、長訊息；只有純文字短訊且整條相等才視為設定。"""
 
     def filter(self, update):
         msg = update.effective_message
@@ -116,7 +116,11 @@ class JunketTextFilter(filters.BaseFilter):
             return False
         if msg.photo or msg.document:
             return False
-        return msg.text.strip() in _JUNKET_KEYWORDS
+        t = msg.text.strip()
+        # 安全防護：多行文字或過長訊息絕不是賭廳設定
+        if "\n" in t or len(t) > 10:
+            return False
+        return t in _JUNKET_KEYWORDS
 
 
 async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -201,14 +205,12 @@ def _build_application(token):
     # 機器人被加入群組 → 提示回覆一次賭廳
     app.add_handler(ChatMemberHandler(
         chat_member_added, ChatMemberHandler.MY_CHAT_MEMBER))
-    # 用戶直接回覆「信威」/「博樂」→ 設定並固定（優先於訂房文字）
-    app.add_handler(MessageHandler(junket_filter, junket_text_handler))
-    # 貼訂房文字（已固定則直接產檔，否則提示先設定）
+    # 貼訂房文字（已固定則直接產檔，否則提示先設定）—— 優先於賭廳設定
     app.add_handler(MessageHandler(text_filter, text_entry))
-    # 其餘訊息：指引
-    app.add_handler(MessageHandler(
-        filters.ALL & ~text_filter & ~junket_filter,
-        fallback_handler))
+    # 用戶直接回覆「信威」/「博樂」→ 設定並固定
+    app.add_handler(MessageHandler(junket_filter, junket_text_handler))
+    # 其餘訊息：指引（fallback 放最後，不做 filter 交集以避免 PTB 相容性問題）
+    app.add_handler(MessageHandler(filters.ALL, fallback_handler))
     return app
 
 
