@@ -36,6 +36,7 @@ HOTELS = {
             "date": "N29",       # 填表日期 Date（N29:O29 為 Date: 右側底線格）
             "billing": "D13",    # 收費 Billing 勾選格 (    ) → ( V )
             "junket": "D22",     # 賭廳名 Junket Name（D22 為填空格，範本預設信威有限公司）
+            "junket_account": "L11",  # JK internal AC no. 戶口 右側填空格（範本預設信威有限公司）
         },
         "guest_first_row": 9,
         "guest_cols": {
@@ -90,6 +91,7 @@ HOTELS = {
             "date": "N30",       # 填表日期 Date（N30:O30 為 Date: 右側底線格）
             "billing": "D13",    # 收費 Billing 勾選格 (    ) → ( V )
             "junket": "D22",     # 賭廳名 Junket Name（D22 為填空格，範本預設信威有限公司）
+            "junket_account": "L11",  # JK internal AC no. 戶口 右側填空格（範本預設信威有限公司）
         },
         "guest_first_row": 3,
         "guest_cols": {
@@ -129,6 +131,7 @@ HOTELS = {
             "date": "N30",       # 填表日期 Date（N30:O30 為 Date: 右側底線格）
             "billing": "D13",    # 收費 Billing 勾選格 (    ) → ( V )
             "junket": "D22",     # 賭廳名 Junket Name（D22 為填空格，範本預設信威有限公司）
+            "junket_account": "L11",  # JK internal AC no. 戶口 右側填空格（範本預設信威有限公司）
         },
         "guest_first_row": 3,
         "guest_cols": {
@@ -182,6 +185,7 @@ HOTELS = {
             "date": "N31",       # 填表日期 Date（N31:O31 為 Date: 右側底線格）
             "billing": "D13",    # 收費 Billing 勾選格 (    ) → ( V )
             "junket": "D22",     # 賭廳名 Junket Name（D22 為填空格，範本預設信威有限公司）
+            "junket_account": "L11",  # JK internal AC no. 戶口 右側填空格（範本預設信威有限公司）
         },
         "guest_first_row": 2,
         "guest_cols": {
@@ -240,6 +244,7 @@ HOTELS = {
             "date": "N30",       # 填表日期 Date（N30:O30 為 Date: 右側底線格）
             "billing": "D13",    # 收費 Billing 勾選格 (    ) → ( V )
             "junket": "D22",     # 賭廳名 Junket Name（D22 為填空格，範本預設信威有限公司）
+            "junket_account": "L11",  # JK internal AC no. 戶口 右側填空格（範本預設信威有限公司）
         },
         "guest_first_row": 3,
         "guest_cols": {
@@ -282,6 +287,7 @@ HOTELS = {
             "date": "N28",       # 填表日期 Date（N28:O28 為 Date: 右側底線格，標籤在 K28）
             "billing": "D13",    # 收費 Billing 勾選格 (    ) → ( V )
             "junket": "D22",     # 賭廳名 Junket Name（D22 為填空格，範本預設信威有限公司）
+            "junket_account": "L11",  # JK internal AC no. 戶口 右側填空格（範本預設信威有限公司）
         },
         "guest_first_row": 0,
         "guest_cols": {},

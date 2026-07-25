@@ -528,12 +528,15 @@ def fill_booking(booking: dict) -> BytesIO:
     if "billing" in mc:
         _check_billing_cell(mws, mc["billing"])
 
-    # ---- 賭廳名 Junket Name：預設信威，可選博樂 ----
+    # ---- 賭廳名 Junket Name 與 JK internal AC no. 戶口：預設信威，可選博樂 ----
     if "junket" in mc:
         junket = (booking.get("junket", "信威") or "信威").strip()
         # 範本顯示完整公司名（信威有限公司 / 博樂有限公司）
         junket_display = _JUNKET_DISPLAY.get(junket, junket)
         mws[mc["junket"]] = junket_display
+        # JK internal AC no. 戶口 右側填空格也同步賭廳公司名
+        if "junket_account" in mc:
+            mws[mc["junket_account"]] = junket_display
 
     # 填表日期（右下角 Date: 後面的底線格；只填日期值，保留模板藍色字體格式）
     if "date" in mc:
