@@ -20,7 +20,7 @@ from parse_text import parse_booking_text, looks_like_booking
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "2026-07-25f"
+VERSION = "2026-07-26g"
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "xinwea-booking-2026")
@@ -76,25 +76,23 @@ def _webhook_base_url():
     return os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL") or None
 
 
-class QueryFilter(filters.BaseFilter):
+class QueryFilter(filters.MessageFilter):
     """匹配 /查 或 /查@botname。"""
-    def filter(self, update):
-        msg = update.effective_message
-        if not msg or not msg.text:
+    def filter(self, message):
+        if not message or not message.text:
             return False
-        t = msg.text.strip()
+        t = message.text.strip()
         return t == "/查" or t.startswith("/查@")
 
 
-class BookingTextFilter(filters.BaseFilter):
+class BookingTextFilter(filters.MessageFilter):
     """判斷訊息是否為訂房文字。"""
-    def filter(self, update):
-        msg = update.effective_message
-        if not msg or not msg.text:
+    def filter(self, message):
+        if not message or not message.text:
             return False
-        if msg.photo or msg.document:
+        if message.photo or message.document:
             return False
-        return looks_like_booking(msg.text)
+        return looks_like_booking(message.text)
 
 
 async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
