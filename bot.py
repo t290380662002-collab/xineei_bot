@@ -16,13 +16,12 @@
 """
 import os
 import asyncio
-import json
 import logging
 from aiohttp import web
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     Application, MessageHandler, ContextTypes,
-    CallbackQueryHandler, ChatMemberHandler, filters,
+    filters,
 )
 from fill import fill_booking, output_filename, verify_booking_names, verify_guests_age
 from parse_text import parse_booking_text, looks_like_booking
@@ -32,33 +31,6 @@ logger = logging.getLogger(__name__)
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "xinwea-booking-2026")
-
-# 每個 chat（群/私聊）固定一次的賭廳設定，寫入 JSON 以便重啟後仍記住。
-JUNKET_SETTINGS_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "junket_settings.json")
-
-
-def load_junket_settings() -> dict:
-    try:
-        with open(JUNKET_SETTINGS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def save_junket_settings(settings: dict):
-    try:
-        with open(JUNKET_SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(settings, f, ensure_ascii=False, indent=2)
-    except Exception:
-        logger.warning("無法寫入 junket 設定檔", exc_info=True)
-
-
-def _junket_keyboard():
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("信威", callback_data="junket:信威"),
-        InlineKeyboardButton("博樂", callback_data="junket:博樂"),
-    ]])
 
 
 async def _produce_and_reply(target, booking: dict):
@@ -100,71 +72,12 @@ class BookingTextFilter(filters.BaseFilter):
 
 
 async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """直接貼上訂房文字 → 解析 → 若本群尚未選定賭廳則詢問一次，
-    選定後固定，之後貼文字直接產檔。"""
+    """貼上訂房文字 → 解析 → 直接產檔。"""
     logger.info("text_entry: msg_id=%s text_len=%s",
                 update.message.message_id if update.message else None,
                 len(update.message.text or ""))
     booking = parse_booking_text(update.message.text)
-    chat_id = update.effective_chat.id
-    settings = load_junket_settings()
-    key = str(chat_id)
-    if key in settings:
-        # 本群已固定賭廳 → 直接產檔，不再詢問
-        booking["junket"] = settings[key]
-        await _produce_and_reply(update.message, booking)
-        return
-    # 尚未設定：暫存訂房資料，彈出按鈕讓用戶選一次賭廳（選後即固定）
-    context.chat_data["pending_booking"] = booking
-    await update.message.reply_text(
-        "本群尚未設定賭廳，請選擇（僅此一次，選後固定）：",
-        reply_markup=_junket_keyboard())
-
-
-async def junket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """用戶點選按鈕後：寫入本群設定（固定），若有待處理訂房則產出 Excel。"""
-    query = update.callback_query
-    await query.answer()
-    data = query.data or ""
-    if not data.startswith("junket:"):
-        return
-    junket = data.split(":", 1)[1]
-    chat_id = update.effective_chat.id
-    key = str(chat_id)
-    settings = load_junket_settings()
-    settings[key] = junket          # 固定到本群（僅一次）
-    save_junket_settings(settings)
-    booking = context.chat_data.get("pending_booking")
-    if booking:
-        booking["junket"] = junket
-        context.chat_data.pop("pending_booking", None)
-        await _produce_and_reply(query.message, booking)
-    try:
-        await query.edit_message_text(
-            f"✅ 已設定本群賭廳為：{junket}（僅此一次，之後貼訂房文字將自動套用）",
-            reply_markup=None)
-    except Exception:
-        pass
-
-
-async def chat_member_added(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """機器人被加入群組時，詢問一次賭廳（已設定過則不重問）。"""
-    member = update.my_chat_member
-    if not member:
-        return
-    chat = update.effective_chat
-    if not chat or chat.type not in ("group", "supergroup"):
-        return
-    if member.new_chat_member.status != "member":
-        return
-    key = str(chat.id)
-    settings = load_junket_settings()
-    if key in settings:
-        return  # 已固定，不重問
-    await context.bot.send_message(
-        chat_id=chat.id,
-        text="歡迎使用訂房機器人！\n請選擇本群所屬賭廳（僅此一次，選後固定）：",
-        reply_markup=_junket_keyboard())
+    await _produce_and_reply(update.message, booking)
 
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -181,17 +94,10 @@ async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _build_application(token):
-    """建立 Application：每群首次按鈕選賭廳並固定，之後直接產檔。"""
+    """建立 Application：貼文字自動產檔，無任何選擇或提示。"""
     app = Application.builder().token(token).build()
     text_filter = BookingTextFilter()
-    # 機器人被加入群組 → 提示選一次賭廳
-    app.add_handler(ChatMemberHandler(
-        chat_member_added, ChatMemberHandler.MY_CHAT_MEMBER))
-    # 點選賭廳按鈕
-    app.add_handler(CallbackQueryHandler(junket_callback, pattern="^junket:"))
-    # 貼訂房文字（已固定��直接產檔，否則彈按鈕）
     app.add_handler(MessageHandler(text_filter, text_entry))
-    # 其餘訊息：指引
     app.add_handler(MessageHandler(filters.ALL, fallback_handler))
     return app
 
