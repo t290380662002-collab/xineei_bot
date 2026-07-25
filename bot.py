@@ -48,7 +48,6 @@ async def _produce_and_reply(target, booking: dict):
             await target.reply_text("\n".join(all_warns))
     except Exception as e:
         logger.exception("產檔失敗")
-        await target.reply_text(f"⚠️ 產檔失敗：{e}")
 
 
 def _webhook_base_url():
