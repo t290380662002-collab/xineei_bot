@@ -74,9 +74,9 @@ async def _produce_and_reply(target, booking: dict):
         all_warns = name_warns + age_warns
         if all_warns:
             await target.reply_text("\n".join(all_warns))
-    except Exception:
+    except Exception as e:
         logger.exception("產檔失敗")
-        await target.reply_text("⚠️ 產檔失敗，請檢查訂房文字格式或稍後再試。")
+        await target.reply_text(f"⚠️ 產檔失敗：{e}")
 
 
 def _webhook_base_url():
