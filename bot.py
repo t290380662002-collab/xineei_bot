@@ -20,6 +20,8 @@ from parse_text import parse_booking_text, looks_like_booking
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+VERSION = "2026-07-25c"
+
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "xinwea-booking-2026")
 
@@ -174,7 +176,8 @@ async def _run_webhook_server(app, base):
         return web.Response(text="ok")
 
     async def handle_health(request):
-        return web.json_response({"status": "ok", "ptb": _ptb_ready})
+        return web.json_response(
+            {"status": "ok", "ptb": _ptb_ready, "version": VERSION})
 
     aio_app = web.Application()
     aio_app.router.add_post(WEBHOOK_PATH, handle_webhook)
