@@ -14,21 +14,11 @@ from config import HOTELS, TEMPLATES_DIR, resolve_hotel
 # 填表日期必須用台灣時間，否則會慢一天。
 TAIWAN_TZ = timezone(timedelta(hours=8))
 
-# 賭廳簡稱 -> 範本顯示完整公司名（JK internal AC no. 戶口 右側欄位）
-_JUNKET_DISPLAY = {
-    "信威": "信威有限公司",
-    "信威有限公司": "信威有限公司",
-    "博樂": "博樂有限公司",
-    "博乐": "博樂有限公司",
-    "博乐有限公司": "博樂有限公司",
-    "博樂有限公司": "博樂有限公司",
-    "伯樂": "博樂有限公司",
-    "伯樂有限公司": "博樂有限公司",
-}
-_JUNKET_CANONICAL = {k: v for v, k in {
+# 賭廳簡稱正規化表：把用戶可能輸入的各種變體統一為「信威」或「博樂」。
+_JUNKET_CANONICAL = {v: k for k, vs in {
     "信威": ["信威", "信威有限公司"],
     "博樂": ["博樂", "博乐", "伯樂", "博樂有限公司", "博乐有限公司", "伯樂有限公司"],
-}.items() for k in v}
+}.items() for v in vs}
 
 # 簡體/繁體 與常見異體字正規化（讓使用者打的簡稱對到模板正式名）
 _CHAR_MAP = {
@@ -531,12 +521,12 @@ def fill_booking(booking: dict) -> BytesIO:
     # ---- 賭廳名 Junket Name 與 JK internal AC no. 戶口：預設信威，可選博樂 ----
     if "junket" in mc:
         junket = (booking.get("junket", "信威") or "信威").strip()
-        # 範本顯示完整公司名（信威有限公司 / 博樂有限公司）
-        junket_display = _JUNKET_DISPLAY.get(junket, junket)
-        mws[mc["junket"]] = junket_display
-        # JK internal AC no. 戶口 右側填空格也同步賭廳公司名
+        # 用戶要求：只寫簡稱（信威 / 博樂），不要「有限公司」。
+        junket_name = _JUNKET_CANONICAL.get(junket, junket)
+        mws[mc["junket"]] = junket_name
+        # JK internal AC no. 戶口 右側填空格也同步賭廳簡稱
         if "junket_account" in mc:
-            mws[mc["junket_account"]] = junket_display
+            mws[mc["junket_account"]] = junket_name
 
     # 填表日期（右下角 Date: 後面的底線格；只填日期值，保留模板藍色字體格式）
     if "date" in mc:
