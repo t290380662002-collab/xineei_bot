@@ -1,27 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 訂房 Telegram Bot
-輸入方式（模式 A）：
-  貼上訂房文字格式（入住：/退房：/飯店：/房型：/件數：/備注：/是否吸煙：/入住者中文：…）
-  -> 自動解析 -> 產生 Excel 回傳
-每筆都產生獨立的新 Excel 檔，直接回傳給使用者下載。
-
-運作模式：
-  - 若環境有 WEBHOOK_URL 或 RENDER_EXTERNAL_URL（Render Web Service 自動注入），
-    則啟用 Webhook 模式：自建 aiohttp 伺服器同時提供
-      · POST /webhook  -> 接收 Telegram 推播
-      · GET  /         -> 健康檢查（回 200），讓 Render 部署不被判失敗
-    「同一隻 Bot 只能有一組 webhook」，因此從根本杜絕 polling 的 409 多實例互踢。
-  - 否則退回 Polling 模式（本機開發用）。
+貼上訂房文字 → 自動解析 → 產生 Excel 回傳。
+支援「查」指令查詢/切換賭廳（信威/博樂），預設信威。
 """
 import os
 import asyncio
+import json
 import logging
 from aiohttp import web
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, MessageHandler, ContextTypes,
-    filters,
+    CallbackQueryHandler, filters,
 )
 from fill import fill_booking, output_filename, verify_booking_names, verify_guests_age
 from parse_text import parse_booking_text, looks_like_booking
@@ -32,9 +23,38 @@ logger = logging.getLogger(__name__)
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "xinwea-booking-2026")
 
+JUNKET_SETTINGS_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "junket_settings.json")
+
+
+def load_junket_settings() -> dict:
+    try:
+        with open(JUNKET_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_junket_settings(settings: dict):
+    try:
+        with open(JUNKET_SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+    except Exception:
+        logger.warning("無法寫入 junket 設定檔", exc_info=True)
+
+
+def _junket_keyboard(current: str):
+    """建立賭廳切換按鈕，當前選中的加 ✓。"""
+    xw = "信威 ✅" if current == "信威" else "信威"
+    bl = "博樂 ✅" if current == "博樂" else "博樂"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(xw, callback_data="switch:信威"),
+        InlineKeyboardButton(bl, callback_data="switch:博樂"),
+    ]])
+
 
 async def _produce_and_reply(target, booking: dict):
-    """產出 Excel 並回傳（target 為 Message 物件）。"""
+    """產出 Excel 並回傳。"""
     try:
         bio = fill_booking(booking)
         fn = output_filename(booking)
@@ -46,97 +66,97 @@ async def _produce_and_reply(target, booking: dict):
         all_warns = name_warns + age_warns
         if all_warns:
             await target.reply_text("\n".join(all_warns))
-    except Exception as e:
+    except Exception:
         logger.exception("產檔失敗")
 
 
 def _webhook_base_url():
-    """回傳 webhook 基底網址（不含路徑）；無則回 None。"""
     return os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL") or None
 
 
 class BookingTextFilter(filters.BaseFilter):
-    """判斷訊息是否為「訂房文字格式」（含至少 4 個可辨識欄位）。
-    顯式排除照片/文件，避免 photo/document 訊息被誤判為文字。"""
-
     def filter(self, update):
         msg = update.effective_message
-        if not msg:
+        if not msg or not msg.text:
             return False
         if msg.photo or msg.document:
-            return False
-        if not msg.text:
             return False
         return looks_like_booking(msg.text)
 
 
 async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """貼上訂房文字 → 解析 → 直接產檔。"""
-    logger.info("text_entry: msg_id=%s text_len=%s",
-                update.message.message_id if update.message else None,
-                len(update.message.text or ""))
+    """貼上訂房文字 → 直接產檔。"""
     booking = parse_booking_text(update.message.text)
+    chat_id = str(update.effective_chat.id)
+    settings = load_junket_settings()
+    booking["junket"] = settings.get(chat_id, "信威")
     await _produce_and_reply(update.message, booking)
 
 
+async def junket_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """「查」→ 顯示目前賭廳並提供切換按鈕。"""
+    chat_id = str(update.effective_chat.id)
+    current = load_junket_settings().get(chat_id, "信威")
+    await update.message.reply_text(
+        f"目前賭廳：{current}\n點擊下方按鈕可切換：",
+        reply_markup=_junket_keyboard(current))
+
+
+async def junket_switch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """切換賭廳。"""
+    query = update.callback_query
+    await query.answer()
+    data = (query.data or "")
+    if not data.startswith("switch:"):
+        return
+    new_junket = data.split(":", 1)[1]
+    chat_id = str(update.effective_chat.id)
+    settings = load_junket_settings()
+    settings[chat_id] = new_junket
+    save_junket_settings(settings)
+    await query.edit_message_text(
+        f"目前賭廳：{new_junket}\n點擊下方按鈕可切換：",
+        reply_markup=_junket_keyboard(new_junket))
+
+
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """任何未被 text_entry 處理的訊息，給一個指引。"""
     msg = update.effective_message
-    logger.info("fallback_handler: msg_id=%s has_photo=%s has_doc=%s text_len=%s",
-                msg.message_id if msg else None,
-                bool(msg.photo) if msg else None,
-                bool(msg.document) if msg else None,
-                len(msg.text or "") if msg and msg.text else 0)
-    await update.effective_message.reply_text(
-        "我看不懂這則訊息喔！\n"
-        "請直接貼上訂房資訊（入住/退房/飯店/房型/件數/入住者…）")
+    logger.info("fallback: msg_id=%s", msg.message_id if msg else None)
+    await msg.reply_text(
+        "請直接貼上訂房資訊（入住/退房/飯店/房型/件數/入住者…）\n"
+        "輸入「查」可查詢/切換賭廳。")
 
 
 def _build_application(token):
-    """建立 Application：貼文字自動產檔，無任何選擇或提示。"""
     app = Application.builder().token(token).build()
-    text_filter = BookingTextFilter()
-    app.add_handler(MessageHandler(text_filter, text_entry))
+    # 點選賭廳切換按鈕
+    app.add_handler(CallbackQueryHandler(junket_switch, pattern="^switch:"))
+    # 貼訂房文字 → 產檔
+    app.add_handler(MessageHandler(BookingTextFilter(), text_entry))
+    # 「查」→ 查詢/切換賭廳
+    app.add_handler(MessageHandler(
+        filters.TEXT & filters.Regex(r"^(查|/junket)$"), junket_query))
+    # 其餘
     app.add_handler(MessageHandler(filters.ALL, fallback_handler))
     return app
 
 
 async def _run_webhook_server(app, base):
-    """自建 aiohttp 伺服器：同時處理 Telegram webhook 與健康檢查。
-    啟動順序：HTTP 伺服器 → PTB 初始化 → webhook 設定。
-    確保健康檢查端點最先可用，避免 Render 判部署失敗。"""
     port = int(os.environ.get("PORT", 10000))
     url = base.rstrip("/") + WEBHOOK_PATH
-
-    # --- 先定義 handler，再啟動 HTTP 伺服器 ---
-    _ptb_ready = False  # 標記 PTB 是否已初始化完成
+    _ptb_ready = False
 
     async def handle_webhook(request):
         if WEBHOOK_SECRET and \
            request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
             return web.Response(status=403, text="forbidden")
         if not _ptb_ready:
-            logger.warning("webhook 收到請求但 PTB 尚未就緒")
             return web.Response(status=503, text="not ready")
         try:
             data = await request.json()
         except Exception:
             return web.Response(status=400, text="bad json")
         update = Update.de_json(data, app.bot)
-        msg_type = "unknown"
-        if update.message:
-            if update.message.photo:
-                msg_type = "photo"
-            elif update.message.document:
-                msg_type = f"document:{update.message.document.mime_type or 'unknown'}"
-            elif update.message.text:
-                msg_type = "text"
-            else:
-                msg_type = "other"
-        logger.info("handle_webhook: update_id=%s msg_id=%s type=%s",
-                    update.update_id,
-                    update.message.message_id if update.message else None,
-                    msg_type)
         try:
             await app.process_update(update)
         except Exception:
@@ -155,18 +175,17 @@ async def _run_webhook_server(app, base):
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logger.info("HTTP 服務啟動於 0.0.0.0:%s (health=/, webhook=%s)", port, WEBHOOK_PATH)
+    logger.info("HTTP 啟動於 0.0.0.0:%s", port)
 
-    # --- HTTP 伺服器已啟動，現在初始化 PTB ---
     try:
         await app.initialize()
         await app.start()
         await app.bot.set_webhook(url=url, secret_token=WEBHOOK_SECRET,
                                   drop_pending_updates=True)
         _ptb_ready = True
-        logger.info("PTB 初始化完成，webhook 已設定：%s", url)
+        logger.info("webhook 已設定：%s", url)
     except Exception:
-        logger.exception("PTB 初始化或 webhook 設定失敗")
+        logger.exception("PTB 初始化失敗")
 
     try:
         while True:
@@ -182,7 +201,6 @@ async def _run_webhook_server(app, base):
 
 
 def main():
-    # 本機開發時從 .env 讀取 token；正式部署請用環境變數設定
     try:
         from dotenv import load_dotenv
         load_dotenv()
@@ -194,23 +212,12 @@ def main():
 
     app = _build_application(token)
     base = _webhook_base_url()
-    logger.info("啟動診斷: RENDER_EXTERNAL_URL=%s WEBHOOK_URL=%s PORT=%s",
-                os.environ.get("RENDER_EXTERNAL_URL"),
-                os.environ.get("WEBHOOK_URL"),
-                os.environ.get("PORT"))
 
     if base:
-        # ---- Webhook 模式（Render Web Service）----
-        logger.info("Bot 啟動中 (webhook) -> %s%s | PORT=%s",
-                    base.rstrip("/"), WEBHOOK_PATH, os.environ.get("PORT"))
-        try:
-            asyncio.run(_run_webhook_server(app, base))
-        except Exception as e:
-            logger.exception("webhook 服務啟動失敗：%s", e)
-            raise
+        logger.info("Bot 啟動 (webhook) -> %s%s", base.rstrip("/"), WEBHOOK_PATH)
+        asyncio.run(_run_webhook_server(app, base))
     else:
-        # ---- Polling 模式（本機開發備援）----
-        logger.info("Bot 啟動中 (polling)...")
+        logger.info("Bot 啟動 (polling)")
         app.run_polling(drop_pending_updates=True, close_loop=False)
 
 
