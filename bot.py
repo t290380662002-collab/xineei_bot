@@ -135,7 +135,7 @@ def _build_application(token):
     app.add_handler(MessageHandler(BookingTextFilter(), text_entry))
     # 「查」→ 查詢/切換賭廳
     app.add_handler(MessageHandler(
-        filters.TEXT & filters.Regex(r"^/查$"), junket_query))
+        filters.TEXT & filters.Regex(r"^/查(@\w+)?$"), junket_query))
     # 其餘
     app.add_handler(MessageHandler(filters.ALL, fallback_handler))
     return app
