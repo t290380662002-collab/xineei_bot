@@ -74,7 +74,14 @@ def _webhook_base_url():
     return os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL") or None
 
 
-class BookingTextFilter(filters.BaseFilter):
+class QueryFilter(filters.BaseFilter):
+    """匹配 /查 或 /查@botname。"""
+    def filter(self, update):
+        msg = update.effective_message
+        if not msg or not msg.text:
+            return False
+        t = msg.text.strip()
+        return t == "/查" or t.startswith("/查@")
     def filter(self, update):
         msg = update.effective_message
         if not msg or not msg.text:
@@ -131,11 +138,10 @@ def _build_application(token):
     app = Application.builder().token(token).build()
     # 點選賭廳切換按鈕
     app.add_handler(CallbackQueryHandler(junket_switch, pattern="^switch:"))
+    # 「/查」→ 查詢/切換賭廳
+    app.add_handler(MessageHandler(QueryFilter(), junket_query))
     # 貼訂房文字 → 產檔
     app.add_handler(MessageHandler(BookingTextFilter(), text_entry))
-    # 「查」→ 查詢/切換賭廳
-    app.add_handler(MessageHandler(
-        filters.TEXT & filters.Regex(r"^/查(@\w+)?$"), junket_query))
     # 其餘
     app.add_handler(MessageHandler(filters.ALL, fallback_handler))
     return app
