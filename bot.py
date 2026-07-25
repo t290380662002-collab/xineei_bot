@@ -18,10 +18,10 @@ import os
 import asyncio
 import logging
 from aiohttp import web
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, MessageHandler, ContextTypes,
-    filters,
+    CallbackQueryHandler, filters,
 )
 from fill import fill_booking, output_filename, verify_booking_names, verify_guests_age
 from parse_text import parse_booking_text, looks_like_booking
@@ -54,27 +54,66 @@ class BookingTextFilter(filters.BaseFilter):
 
 
 async def text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """直接貼上訂房文字 → 解析 → 產生 Excel 回傳。"""
+    """直接貼上訂房文字 → 解析 → 詢問賭廳 → 產生 Excel 回傳。"""
     logger.info("text_entry: msg_id=%s text_len=%s",
                 update.message.message_id if update.message else None,
                 len(update.message.text or ""))
     booking = parse_booking_text(update.message.text)
+    # 先記住解析結果，等待用戶選擇賭廳後才產檔
+    context.user_data["pending_booking"] = booking
+    g0 = (booking.get("guests") or [{}])[0]
+    name = g0.get("cn_name") or g0.get("en_name") or ""
+    hotel = booking.get("飯店", "")
+    checkin = booking.get("入住", "")
+    checkout = booking.get("退房", "")
+    summary = f"飯店：{hotel}\n姓名：{name}\n入住：{checkin} 退房：{checkout}\n\n請選擇賭廳："
+    keyboard = [
+        [
+            InlineKeyboardButton("信威-澳門廳", callback_data="junket:信威"),
+            InlineKeyboardButton("博樂-澳門廳", callback_data="junket:博樂"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    sent = await update.message.reply_text(summary, reply_markup=reply_markup)
+    context.user_data["pending_msg_id"] = sent.message_id
+
+
+async def junket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """用戶點選賭廳後，設定 junket 並產出 Excel。"""
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+    if not data.startswith("junket:"):
+        return
+    junket = data.split(":", 1)[1]
+    booking = context.user_data.get("pending_booking")
+    if not booking:
+        await query.edit_message_text("⚠️ 找不到待處理的訂房資料，請重新貼上訂房文字。")
+        return
+    booking["junket"] = junket
+    # 移除鍵盤，顯示已選擇
+    await query.edit_message_reply_markup(reply_markup=None)
     try:
         bio = fill_booking(booking)
         fn = output_filename(booking)
-        await update.message.reply_document(
-            document=bio, filename=fn,
-            caption="✅ 已從文字自動填入，訂房 Excel 請下載：")
+        await query.message.reply_document(
+            document=bio,
+            filename=fn,
+            caption=f"✅ 已選擇賭廳：{junket}，訂房 Excel 請下載：",
+        )
         # 中文 / 英文姓名拼音自動核對：不符時提示使用者確認
         name_ok, name_warns = verify_booking_names(booking)
         # 年齡檢查：未滿 21 歲提示
         age_ok, age_warns = verify_guests_age(booking)
         all_warns = name_warns + age_warns
         if all_warns:
-            await update.message.reply_text("\n".join(all_warns))
+            await query.message.reply_text("\n".join(all_warns))
     except Exception:
-        logger.exception("文字產檔失敗")
-    return
+        logger.exception("產檔失敗")
+        await query.message.reply_text("⚠️ 產檔失敗，請檢查訂房文字格式或稍後再試。")
+    finally:
+        context.user_data.pop("pending_booking", None)
+        context.user_data.pop("pending_msg_id", None)
 
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -91,9 +130,10 @@ async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _build_application(token):
-    """建立 Application：僅保留「貼文字自動產檔」模式（模式 A）。"""
+    """建立 Application：貼文字後先詢問賭廳，再產檔。"""
     app = Application.builder().token(token).build()
     text_filter = BookingTextFilter()
+    app.add_handler(CallbackQueryHandler(junket_callback, pattern="^junket:"))
     app.add_handler(MessageHandler(text_filter, text_entry))
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & ~text_filter,

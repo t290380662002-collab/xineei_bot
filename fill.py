@@ -512,6 +512,16 @@ def fill_booking(booking: dict) -> BytesIO:
     if "billing" in mc:
         _check_billing_cell(mws, mc["billing"])
 
+    # ---- 賭廳名 Junket Name：預設信威，可選博樂 ----
+    if "junket" in mc:
+        junket = (booking.get("junket", "信威") or "信威").strip()
+        # 檔名用簡稱，範本顯示完整「X-澳門廳」
+        if junket and "-澳門廳" not in junket and "澳門廳" not in junket:
+            junket_full = f"{junket}-澳門廳"
+        else:
+            junket_full = junket or "信威-澳門廳"
+        mws[mc["junket"]] = junket_full
+
     # 填表日期（右下角 Date: 後面的底線格；只填日期值，保留模板藍色字體格式）
     if "date" in mc:
         _set_merged_cell(mws, mc["date"], datetime.now(TAIWAN_TZ).strftime('%Y/%m/%d'))
@@ -589,8 +599,8 @@ def _short_date(raw: str) -> str:
 
 
 def output_filename(booking: dict) -> str:
-    """產出檔名：{入住月.日}-{退房月.日}-{飯店}-信威-{姓名}.xlsx
-    年份不顯示；分隔符統一用 -；「信威」為固定中段標籤（非代理）；
+    """產出檔名：{入住月.日}-{退房月.日}-{飯店}-{賭廳}-{姓名}.xlsx
+    年份不顯示；分隔符統一用 -；賭廳預設「信威」，可選「博樂」；
     姓名會轉繁體（港澳用字，如 李彦超→李彥超）。
     若缺日期則回退為「訂房」前綴。"""
     hotel = resolve_hotel(booking.get("飯店", "")) or "訂房"
@@ -613,7 +623,8 @@ def output_filename(booking: dict) -> str:
         prefix = co
     else:
         prefix = "訂房"
-    return f"{prefix}-{hotel}-信威-{name}.xlsx"
+    junket = (booking.get("junket", "信威") or "信威").strip()
+    return f"{prefix}-{hotel}-{junket}-{name}.xlsx"
 
 
 # ---------------------------------------------------------------------------
