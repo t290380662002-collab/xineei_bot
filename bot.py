@@ -126,8 +126,8 @@ async def junket_switch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     settings[chat_id] = new_junket
     save_junket_settings(settings)
     await query.edit_message_text(
-        f"目前賭廳：{new_junket}\n點擊下方按鈕可切換：",
-        reply_markup=_junket_keyboard(new_junket))
+        f"✅ 已設定本群賭廳為：{new_junket}（已固定）",
+        reply_markup=None)
 
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
