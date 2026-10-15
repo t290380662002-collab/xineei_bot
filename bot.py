@@ -20,7 +20,7 @@ from parse_text import parse_booking_text, looks_like_booking
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "2026-07-26j"
+VERSION = "2026-10-15a"
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "xinwea-booking-2026")
@@ -214,10 +214,11 @@ async def _run_webhook_server(app, base):
         while True:
             await asyncio.sleep(3600)
     finally:
-        try:
-            await app.bot.delete_webhook()
-        except Exception:
-            pass
+        # 注意：絕對不要在此刪除 webhook！
+        # Render 重新部署時新舊實例有短暫重疊期，舊實例臨終時執行 delete_webhook
+        # 會把「新實例剛設好的 webhook」一併刪掉，導致 webhook url 變空、
+        # bot 完全收不到任何消息（2026-10-15 找到並修復此根因）。
+        # 停機時保留 webhook 即可：Telegram 會自動重試推播，新實例起來後續投。
         await app.stop()
         await app.shutdown()
         await runner.cleanup()
