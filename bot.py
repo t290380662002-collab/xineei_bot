@@ -20,7 +20,7 @@ from parse_text import parse_booking_text, looks_like_booking
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "2026-10-15a"
+VERSION = "2026-10-15b"
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "xinwea-booking-2026")
@@ -203,8 +203,24 @@ async def _run_webhook_server(app, base):
     try:
         await app.initialize()
         await app.start()
-        await app.bot.set_webhook(url=url, secret_token=WEBHOOK_SECRET,
-                                  drop_pending_updates=True)
+        await app.bot.set_webhook(
+            url=url,
+            secret_token=WEBHOOK_SECRET,
+            drop_pending_updates=True,
+            # 顯式列出更新類型，避免再次漏掉 callback_query（按鈕點擊會無反應）。
+            # 注意：Telegram 若省略 allowed_updates 會「保留舊值」，
+            # 一旦被設成不含 callback_query 就永遠收不到按鈕事件。
+            allowed_updates=[
+                "message",
+                "edited_message",
+                "callback_query",
+                "channel_post",
+                "edited_channel_post",
+                "inline_query",
+                "my_chat_member",
+                "chat_join_request",
+            ],
+        )
         _ptb_ready = True
         logger.info("webhook 已設定：%s", url)
     except Exception:
